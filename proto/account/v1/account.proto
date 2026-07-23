@@ -1,0 +1,35 @@
+syntax = "proto3";
+
+package account.v1;
+
+option go_package = "github.com/amirzre/payment-system/gen/go/account/v1;accountv1";
+
+service AccountService {
+  rpc CreateAccount(CreateAccountRequest) returns (CreateAccountResponse);
+  rpc GetAccount(GetAccountRequest) returns (GetAccountResponse);
+}
+
+message Account {
+  string id = 1;
+  string owner_ref = 2;
+  string currency = 3;
+  string status = 4;
+  string created_at = 5;
+}
+
+message CreateAccountRequest {
+  string owner_ref = 1;
+  string currency = 2;
+}
+
+message CreateAccountResponse {
+  Account account = 1;
+}
+
+message GetAccountRequest {
+  string id = 1;
+}
+
+message GetAccountResponse {
+  Account account = 1;
+}
