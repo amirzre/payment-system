@@ -11,6 +11,7 @@ proto-lint:
 # Build all services
 build:
 	cd services/account && go build ./cmd/server/...
+	cd services/ledger && go build ./cmd/server/...
 
 # Run all tests (unit + integration)
 test-all:
