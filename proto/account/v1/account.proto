@@ -7,6 +7,7 @@ option go_package = "github.com/amirzre/payment-system/gen/go/account/v1;account
 service AccountService {
   rpc CreateAccount(CreateAccountRequest) returns (CreateAccountResponse);
   rpc GetAccount(GetAccountRequest) returns (GetAccountResponse);
+  rpc GetBalance(GetBalanceRequest) returns (GetBalanceResponse);
 }
 
 message Account {
@@ -32,4 +33,14 @@ message GetAccountRequest {
 
 message GetAccountResponse {
   Account account = 1;
+}
+
+message GetBalanceRequest {
+  string account_id = 1;
+}
+
+message GetBalanceResponse {
+  string account_id = 1;
+  int64 balance_minor = 2;
+  string currency = 3;
 }

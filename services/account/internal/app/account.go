@@ -10,6 +10,7 @@ import (
 	"github.com/amirzre/payment-system/services/account/internal/repository"
 	"github.com/google/uuid"
 
+	ledgerv1 "github.com/amirzre/payment-system/gen/go/ledger/v1"
 	sharederrors "github.com/amirzre/payment-system/shared/errors"
 )
 
@@ -19,19 +20,27 @@ type CreateAccountReq struct {
 	Currency string
 }
 
+// BalanceResponse holds the result of a balance query.
+type BalanceResponse struct {
+	BalanceMinor int64
+	Currency     string
+}
+
 // AccountService defines the interface for account business logic.
 type AccountService interface {
 	Create(ctx context.Context, accountReq CreateAccountReq) (*domain.Account, error)
 	GetByID(ctx context.Context, id uuid.UUID) (*domain.Account, error)
+	GetBalance(ctx context.Context, accountID uuid.UUID) (*BalanceResponse, error)
 }
 
 // accountService implements AccountService interface.
 type accountService struct {
-	repo repository.AccountRepository
+	repo         repository.AccountRepository
+	ledgerClient ledgerv1.LedgerServiceClient
 }
 
 // NewAccountService creates a new account service instance.
-func NewAccountService(repo repository.AccountRepository) AccountService {
+func NewAccountService(repo repository.AccountRepository, ledgerClient ledgerv1.LedgerServiceClient) AccountService {
 	return &accountService{repo: repo}
 }
 
@@ -72,4 +81,25 @@ func (s *accountService) GetByID(ctx context.Context, id uuid.UUID) (*domain.Acc
 	}
 
 	return account, nil
+}
+
+// GetBalance retrieves the balance, using Redis cache if available.
+func (s *accountService) GetBalance(ctx context.Context, accountID uuid.UUID) (*BalanceResponse, error) {
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+
+	resp, err := s.ledgerClient.GetBalance(ctx, &ledgerv1.GetBalanceRequest{
+		AccountId: accountID.String(),
+	})
+	if err != nil {
+		return nil, sharederrors.Wrap(sharederrors.KindInternal,
+			fmt.Sprintf("calling ledger-service.GetBalance for account %s", accountID), err)
+	}
+
+	result := &BalanceResponse{
+		BalanceMinor: resp.GetBalanceMinor(),
+		Currency:     resp.GetCurrency(),
+	}
+
+	return result, nil
 }
