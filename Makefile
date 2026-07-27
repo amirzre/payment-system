@@ -12,12 +12,14 @@ proto-lint:
 build:
 	cd services/account && go build ./cmd/server/...
 	cd services/ledger && go build ./cmd/server/...
+	cd services/payment && go build ./cmd/server/...
 
 # Run all tests (unit + integration)
 test-all:
 	cd shared && go test ./... -v -race -count=1
 	cd services/account && go test ./... -v -race -count=1
 	cd services/ledger && go test ./... -v -race -count=1
+	cd services/payment && go test ./... -v -race -count=1
 
 # Run shared package tests
 test:

@@ -26,8 +26,8 @@ type paymentService struct {
 	ledgerClient  ledgerv1.LedgerServiceClient
 }
 
-// NewLedgerEntryService creates a new ledger service instance.
-func NewLedgerEntryService(
+// NewPaymentService creates a new payment service instance.
+func NewPaymentService(
 	repo repository.PaymentRepository,
 	accountClient accountv1.AccountServiceClient,
 	ledgerClient ledgerv1.LedgerServiceClient,
