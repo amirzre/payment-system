@@ -33,6 +33,23 @@ services:
       timeout: 5s
       retries: 5
 
+  postgres-payment:
+    image: postgres:18-alpine
+    container_name: postgres-payment
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgresql
+      POSTGRES_DB: payment
+    ports:
+      - "5434:5432"
+    volumes:
+      - pg_payment_data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d payment"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
   pgadmin:
     image: dpage/pgadmin4:latest
     container_name: pgadmin
@@ -50,4 +67,5 @@ services:
 volumes:
   pg_account_data:
   pg_ledger_data:
+  pg_payment_data:
   pgadmin_data:
