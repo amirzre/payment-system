@@ -1,0 +1,42 @@
+syntax = "proto3";
+
+package payment.v1;
+
+option go_package = "github.com/amirzre/payment-system/gen/go/payment/v1;paymentv1";
+
+service PaymentService {
+  rpc CreatePayment(CreatePaymentRequest) returns (CreatePaymentResponse);
+  rpc GetPayment(GetPaymentRequest) returns (GetPaymentResponse);
+}
+
+message Payment {
+  string id = 1;
+  string idempotency_key = 2;
+  string source_account_id = 3;
+  string destination_account_id = 4;
+  int64 amount_minor = 5;
+  string currency = 6;
+  string status = 7;
+  string created_at = 8;
+  string updated_at = 9;
+}
+
+message CreatePaymentRequest {
+  string idempotency_key = 1;
+  string source_account_id = 2;
+  string destination_account_id = 3;
+  int64 amount_minor = 4;
+  string currency = 5;
+}
+
+message CreatePaymentResponse {
+  Payment payment = 1;
+}
+
+message GetPaymentRequest {
+  string id = 1;
+}
+
+message GetPaymentResponse {
+  Payment payment = 1;
+}
