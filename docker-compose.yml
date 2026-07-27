@@ -49,6 +49,23 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+  
+  postgres-auth:
+    image: postgres:18-alpine
+    container_name: postgres-auth
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgresql
+      POSTGRES_DB: auth
+    ports:
+      - "5435:5432"
+    volumes:
+      - pg_auth_data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d auth"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
 
   pgadmin:
     image: dpage/pgadmin4:latest
@@ -68,4 +85,5 @@ volumes:
   pg_account_data:
   pg_ledger_data:
   pg_payment_data:
+  pg_auth_data:
   pgadmin_data:
