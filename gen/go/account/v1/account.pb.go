@@ -281,6 +281,110 @@ func (x *GetAccountResponse) GetAccount() *Account {
 	return nil
 }
 
+type GetBalanceRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	AccountId     string                 `protobuf:"bytes,1,opt,name=account_id,json=accountId,proto3" json:"account_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetBalanceRequest) Reset() {
+	*x = GetBalanceRequest{}
+	mi := &file_account_v1_account_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetBalanceRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetBalanceRequest) ProtoMessage() {}
+
+func (x *GetBalanceRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_account_v1_account_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetBalanceRequest.ProtoReflect.Descriptor instead.
+func (*GetBalanceRequest) Descriptor() ([]byte, []int) {
+	return file_account_v1_account_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *GetBalanceRequest) GetAccountId() string {
+	if x != nil {
+		return x.AccountId
+	}
+	return ""
+}
+
+type GetBalanceResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	AccountId     string                 `protobuf:"bytes,1,opt,name=account_id,json=accountId,proto3" json:"account_id,omitempty"`
+	BalanceMinor  int64                  `protobuf:"varint,2,opt,name=balance_minor,json=balanceMinor,proto3" json:"balance_minor,omitempty"`
+	Currency      string                 `protobuf:"bytes,3,opt,name=currency,proto3" json:"currency,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetBalanceResponse) Reset() {
+	*x = GetBalanceResponse{}
+	mi := &file_account_v1_account_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetBalanceResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetBalanceResponse) ProtoMessage() {}
+
+func (x *GetBalanceResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_account_v1_account_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetBalanceResponse.ProtoReflect.Descriptor instead.
+func (*GetBalanceResponse) Descriptor() ([]byte, []int) {
+	return file_account_v1_account_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *GetBalanceResponse) GetAccountId() string {
+	if x != nil {
+		return x.AccountId
+	}
+	return ""
+}
+
+func (x *GetBalanceResponse) GetBalanceMinor() int64 {
+	if x != nil {
+		return x.BalanceMinor
+	}
+	return 0
+}
+
+func (x *GetBalanceResponse) GetCurrency() string {
+	if x != nil {
+		return x.Currency
+	}
+	return ""
+}
+
 var File_account_v1_account_proto protoreflect.FileDescriptor
 
 const file_account_v1_account_proto_rawDesc = "" +
@@ -302,11 +406,21 @@ const file_account_v1_account_proto_rawDesc = "" +
 	"\x11GetAccountRequest\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\"C\n" +
 	"\x12GetAccountResponse\x12-\n" +
-	"\aaccount\x18\x01 \x01(\v2\x13.account.v1.AccountR\aaccount2\xb3\x01\n" +
+	"\aaccount\x18\x01 \x01(\v2\x13.account.v1.AccountR\aaccount\"2\n" +
+	"\x11GetBalanceRequest\x12\x1d\n" +
+	"\n" +
+	"account_id\x18\x01 \x01(\tR\taccountId\"t\n" +
+	"\x12GetBalanceResponse\x12\x1d\n" +
+	"\n" +
+	"account_id\x18\x01 \x01(\tR\taccountId\x12#\n" +
+	"\rbalance_minor\x18\x02 \x01(\x03R\fbalanceMinor\x12\x1a\n" +
+	"\bcurrency\x18\x03 \x01(\tR\bcurrency2\x80\x02\n" +
 	"\x0eAccountService\x12T\n" +
 	"\rCreateAccount\x12 .account.v1.CreateAccountRequest\x1a!.account.v1.CreateAccountResponse\x12K\n" +
 	"\n" +
-	"GetAccount\x12\x1d.account.v1.GetAccountRequest\x1a\x1e.account.v1.GetAccountResponseB\xa6\x01\n" +
+	"GetAccount\x12\x1d.account.v1.GetAccountRequest\x1a\x1e.account.v1.GetAccountResponse\x12K\n" +
+	"\n" +
+	"GetBalance\x12\x1d.account.v1.GetBalanceRequest\x1a\x1e.account.v1.GetBalanceResponseB\xa6\x01\n" +
 	"\x0ecom.account.v1B\fAccountProtoP\x01Z=github.com/amirzre/payment-system/gen/go/account/v1;accountv1\xa2\x02\x03AXX\xaa\x02\n" +
 	"Account.V1\xca\x02\n" +
 	"Account\\V1\xe2\x02\x16Account\\V1\\GPBMetadata\xea\x02\vAccount::V1b\x06proto3"
@@ -323,23 +437,27 @@ func file_account_v1_account_proto_rawDescGZIP() []byte {
 	return file_account_v1_account_proto_rawDescData
 }
 
-var file_account_v1_account_proto_msgTypes = make([]protoimpl.MessageInfo, 5)
+var file_account_v1_account_proto_msgTypes = make([]protoimpl.MessageInfo, 7)
 var file_account_v1_account_proto_goTypes = []any{
 	(*Account)(nil),               // 0: account.v1.Account
 	(*CreateAccountRequest)(nil),  // 1: account.v1.CreateAccountRequest
 	(*CreateAccountResponse)(nil), // 2: account.v1.CreateAccountResponse
 	(*GetAccountRequest)(nil),     // 3: account.v1.GetAccountRequest
 	(*GetAccountResponse)(nil),    // 4: account.v1.GetAccountResponse
+	(*GetBalanceRequest)(nil),     // 5: account.v1.GetBalanceRequest
+	(*GetBalanceResponse)(nil),    // 6: account.v1.GetBalanceResponse
 }
 var file_account_v1_account_proto_depIdxs = []int32{
 	0, // 0: account.v1.CreateAccountResponse.account:type_name -> account.v1.Account
 	0, // 1: account.v1.GetAccountResponse.account:type_name -> account.v1.Account
 	1, // 2: account.v1.AccountService.CreateAccount:input_type -> account.v1.CreateAccountRequest
 	3, // 3: account.v1.AccountService.GetAccount:input_type -> account.v1.GetAccountRequest
-	2, // 4: account.v1.AccountService.CreateAccount:output_type -> account.v1.CreateAccountResponse
-	4, // 5: account.v1.AccountService.GetAccount:output_type -> account.v1.GetAccountResponse
-	4, // [4:6] is the sub-list for method output_type
-	2, // [2:4] is the sub-list for method input_type
+	5, // 4: account.v1.AccountService.GetBalance:input_type -> account.v1.GetBalanceRequest
+	2, // 5: account.v1.AccountService.CreateAccount:output_type -> account.v1.CreateAccountResponse
+	4, // 6: account.v1.AccountService.GetAccount:output_type -> account.v1.GetAccountResponse
+	6, // 7: account.v1.AccountService.GetBalance:output_type -> account.v1.GetBalanceResponse
+	5, // [5:8] is the sub-list for method output_type
+	2, // [2:5] is the sub-list for method input_type
 	2, // [2:2] is the sub-list for extension type_name
 	2, // [2:2] is the sub-list for extension extendee
 	0, // [0:2] is the sub-list for field type_name
@@ -356,7 +474,7 @@ func file_account_v1_account_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_account_v1_account_proto_rawDesc), len(file_account_v1_account_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   5,
+			NumMessages:   7,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

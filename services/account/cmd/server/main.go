@@ -10,6 +10,7 @@ import (
 	"syscall"
 
 	accountv1 "github.com/amirzre/payment-system/gen/go/account/v1"
+	ledgerv1 "github.com/amirzre/payment-system/gen/go/ledger/v1"
 	"github.com/amirzre/payment-system/services/account/internal/app"
 	"github.com/amirzre/payment-system/services/account/internal/config"
 	"github.com/amirzre/payment-system/services/account/internal/repository"
@@ -17,6 +18,7 @@ import (
 	"github.com/amirzre/payment-system/shared/logger"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/reflection"
 )
 
@@ -43,9 +45,16 @@ func main() {
 	}
 	log.Info("connected to database")
 
+	// gRPC client to ledger-service
+	ledgerConn, _ := grpc.NewClient(cfg.Service.LedgerGRPCAddr,
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
+	defer ledgerConn.Close()
+	ledgerClient := ledgerv1.NewLedgerServiceClient(ledgerConn)
+
 	// Construct dependency graph
 	accountRepo := repository.NewAccountRepository(pool)
-	accountSrv := app.NewAccountService(accountRepo)
+	accountSrv := app.NewAccountService(accountRepo, ledgerClient)
 	accountServer := accounttransport.NewAccountServer(accountSrv)
 
 	// Set up gRPC server

@@ -40,7 +40,7 @@ func Load() *Config {
 			GRPCPort:    getIntEnv("SERVER_PORT", 50051),
 		},
 		ServiceConfig{
-			LedgerGRPCAddr: getEnv("LEDGER_GRPC_ADDR", "http://ledger-service:50052"),
+			LedgerGRPCAddr: getEnv("LEDGER_GRPC_ADDR", "http://localhost:50052"),
 		},
 		DatabaseConfig{
 			DatabaseURL: getEnv("DATABASE_URL", "postgres://postgres:postgresql@localhost:5432/account?sslmode=disable"),
