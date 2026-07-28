@@ -15,6 +15,7 @@ import (
 	"github.com/amirzre/payment-system/services/ledger/internal/repository"
 	ledgertransport "github.com/amirzre/payment-system/services/ledger/internal/transport/grpc"
 	"github.com/amirzre/payment-system/shared/logger"
+	"github.com/amirzre/payment-system/shared/middleware"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/reflection"
@@ -49,7 +50,7 @@ func main() {
 	ledgerServer := ledgertransport.NewLedgerServer(ledgerSrv)
 
 	// Set up gRPC server
-	grpcServer := grpc.NewServer()
+	grpcServer := grpc.NewServer(middleware.UnaryServerChain(log))
 	ledgerv1.RegisterLedgerServiceServer(grpcServer, ledgerServer)
 
 	reflection.Register(grpcServer)

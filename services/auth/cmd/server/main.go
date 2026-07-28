@@ -16,6 +16,7 @@ import (
 	"github.com/amirzre/payment-system/services/auth/internal/repository"
 	authgrpc "github.com/amirzre/payment-system/services/auth/internal/transport/grpc"
 	"github.com/amirzre/payment-system/shared/logger"
+	"github.com/amirzre/payment-system/shared/middleware"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/reflection"
@@ -56,7 +57,7 @@ func main() {
 	authSrv := app.NewAuthService(authRepo, tokenService)
 
 	// Set up gRPC server with middleware chain
-	grpcServer := grpc.NewServer()
+	grpcServer := grpc.NewServer(middleware.UnaryServerChain(log))
 	authServer := authgrpc.NewAuthServer(authSrv)
 	authv1.RegisterAuthServiceServer(grpcServer, authServer)
 

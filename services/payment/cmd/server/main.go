@@ -17,6 +17,7 @@ import (
 	"github.com/amirzre/payment-system/services/payment/internal/repository"
 	paymentgrpc "github.com/amirzre/payment-system/services/payment/internal/transport/grpc"
 	"github.com/amirzre/payment-system/shared/logger"
+	"github.com/amirzre/payment-system/shared/middleware"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -64,7 +65,7 @@ func main() {
 	paymentSrv := app.NewPaymentService(paymentRepo, accountClient, ledgerClient)
 
 	// Set up gRPC server
-	grpcServer := grpc.NewServer()
+	grpcServer := grpc.NewServer(middleware.UnaryServerChain(log))
 	paymentv1.RegisterPaymentServiceServer(grpcServer, paymentgrpc.NewPaymentServer(paymentSrv))
 	reflection.Register(grpcServer)
 
