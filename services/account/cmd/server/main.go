@@ -18,6 +18,7 @@ import (
 	"github.com/amirzre/payment-system/shared/logger"
 	"github.com/amirzre/payment-system/shared/middleware"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/redis/go-redis/v9"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/reflection"
@@ -46,6 +47,15 @@ func main() {
 	}
 	log.Info("connected to database")
 
+	// Connect to Redis
+	var rdb *redis.Client
+	if cfg.Redis.RedisURL != "" {
+		rdb = redis.NewClient(&redis.Options{Addr: cfg.Redis.RedisURL})
+		if rdb.Ping(ctx).Err() != nil {
+			rdb = nil
+		}
+	}
+
 	// gRPC client to ledger-service
 	ledgerConn, _ := grpc.NewClient(cfg.Service.LedgerGRPCAddr,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
@@ -55,7 +65,7 @@ func main() {
 
 	// Construct dependency graph
 	accountRepo := repository.NewAccountRepository(pool)
-	accountSrv := app.NewAccountService(accountRepo, ledgerClient)
+	accountSrv := app.NewAccountService(accountRepo, ledgerClient, rdb)
 	accountServer := accounttransport.NewAccountServer(accountSrv)
 
 	// Set up gRPC server
