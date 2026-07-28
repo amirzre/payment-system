@@ -12,6 +12,7 @@ type Config struct {
 	Server   ServerConfig
 	Database DatabaseConfig
 	Service  ServiceConfig
+	Redis    RedisConfig
 }
 
 // ServerConfig holds server configuration.
@@ -31,6 +32,11 @@ type ServiceConfig struct {
 	LedgerGRPCAddr  string
 }
 
+// RedisConfig holds Redis configuration.
+type RedisConfig struct {
+	RedisURL string
+}
+
 // Load loads configuration from environment variables.
 func Load() *Config {
 	_ = godotenv.Load()
@@ -46,6 +52,9 @@ func Load() *Config {
 		ServiceConfig{
 			AccountGRPCAddr: getEnv("ACCOUNT_GRPC_ADDR", "http://localhost:50051"),
 			LedgerGRPCAddr:  getEnv("LEDGER_GRPC_ADDR", "http://localhost:50052"),
+		},
+		RedisConfig{
+			RedisURL: getEnv("REDIS_URL", "redis://localhost:6379/0"),
 		},
 	}
 }

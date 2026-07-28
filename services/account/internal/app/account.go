@@ -9,6 +9,7 @@ import (
 	"github.com/amirzre/payment-system/services/account/internal/domain"
 	"github.com/amirzre/payment-system/services/account/internal/repository"
 	"github.com/google/uuid"
+	"github.com/redis/go-redis/v9"
 
 	ledgerv1 "github.com/amirzre/payment-system/gen/go/ledger/v1"
 	sharederrors "github.com/amirzre/payment-system/shared/errors"
@@ -37,11 +38,20 @@ type AccountService interface {
 type accountService struct {
 	repo         repository.AccountRepository
 	ledgerClient ledgerv1.LedgerServiceClient
+	redisClient  *redis.Client
 }
 
 // NewAccountService creates a new account service instance.
-func NewAccountService(repo repository.AccountRepository, ledgerClient ledgerv1.LedgerServiceClient) AccountService {
-	return &accountService{repo: repo}
+func NewAccountService(
+	repo repository.AccountRepository,
+	ledgerClient ledgerv1.LedgerServiceClient,
+	redisClient *redis.Client,
+) AccountService {
+	return &accountService{
+		repo:         repo,
+		ledgerClient: ledgerClient,
+		redisClient:  redisClient,
+	}
 }
 
 // Create creates a new account after validating the input and domain rules.
@@ -85,6 +95,19 @@ func (s *accountService) GetByID(ctx context.Context, id uuid.UUID) (*domain.Acc
 
 // GetBalance retrieves the balance, using Redis cache if available.
 func (s *accountService) GetBalance(ctx context.Context, accountID uuid.UUID) (*BalanceResponse, error) {
+	cacheKey := fmt.Sprintf("balance:%s", accountID.String())
+
+	if s.redisClient != nil {
+		val, err := s.redisClient.Get(ctx, cacheKey).Result()
+		if err == nil {
+			var balance int64
+			var currency string
+			if _, scanErr := fmt.Scanf(val, "%d:%s", &balance, &currency); scanErr == nil {
+				return &BalanceResponse{BalanceMinor: balance, Currency: currency}, nil
+			}
+		}
+	}
+
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
 
@@ -99,6 +122,11 @@ func (s *accountService) GetBalance(ctx context.Context, accountID uuid.UUID) (*
 	result := &BalanceResponse{
 		BalanceMinor: resp.GetBalanceMinor(),
 		Currency:     resp.GetCurrency(),
+	}
+
+	if s.redisClient != nil {
+		cacheVal := fmt.Sprintf("%d:%s", result.BalanceMinor, result.Currency)
+		s.redisClient.Set(ctx, cacheKey, cacheVal, 60*time.Second)
 	}
 
 	return result, nil

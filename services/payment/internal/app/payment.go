@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"time"
 
 	accountv1 "github.com/amirzre/payment-system/gen/go/account/v1"
@@ -10,6 +11,7 @@ import (
 	"github.com/amirzre/payment-system/services/payment/internal/domain"
 	"github.com/amirzre/payment-system/services/payment/internal/repository"
 	sharederrors "github.com/amirzre/payment-system/shared/errors"
+	"github.com/amirzre/payment-system/shared/middleware"
 	"github.com/google/uuid"
 )
 
@@ -24,6 +26,7 @@ type paymentService struct {
 	repo          repository.PaymentRepository
 	accountClient accountv1.AccountServiceClient
 	ledgerClient  ledgerv1.LedgerServiceClient
+	idempotency   *middleware.RedisIdempotency
 }
 
 // NewPaymentService creates a new payment service instance.
@@ -31,11 +34,13 @@ func NewPaymentService(
 	repo repository.PaymentRepository,
 	accountClient accountv1.AccountServiceClient,
 	ledgerClient ledgerv1.LedgerServiceClient,
+	idempotency *middleware.RedisIdempotency,
 ) PaymentService {
 	return &paymentService{
 		repo:          repo,
 		accountClient: accountClient,
 		ledgerClient:  ledgerClient,
+		idempotency:   idempotency,
 	}
 }
 
@@ -50,6 +55,23 @@ type CreatePaymentInput struct {
 
 // Create orchestrates the synchronous payment flow.
 func (s *paymentService) Create(ctx context.Context, input CreatePaymentInput) (*domain.PaymentIntent, error) {
+	if s.idempotency != nil {
+		isNew, redisErr := s.idempotency.CheckAndSet(ctx, input.IdempotencyKey)
+		if redisErr != nil {
+			var logger *slog.Logger
+			_ = logger
+		}
+		if !isNew {
+			existing, err := s.repo.GetByIdempotencyKey(ctx, input.IdempotencyKey)
+			if err != nil {
+				return nil, sharederrors.Wrap(sharederrors.KindInternal, "checking idempotency after redis hit", err)
+			}
+			if existing != nil {
+				return existing, nil
+			}
+		}
+	}
+
 	existing, err := s.repo.GetByIdempotencyKey(ctx, input.IdempotencyKey)
 	if err != nil {
 		return nil, sharederrors.Wrap(sharederrors.KindInternal, "checking idempotency", err)

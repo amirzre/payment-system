@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	accountv1 "github.com/amirzre/payment-system/gen/go/account/v1"
 	ledgerv1 "github.com/amirzre/payment-system/gen/go/ledger/v1"
@@ -19,6 +20,7 @@ import (
 	"github.com/amirzre/payment-system/shared/logger"
 	"github.com/amirzre/payment-system/shared/middleware"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/redis/go-redis/v9"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/reflection"
@@ -47,6 +49,15 @@ func main() {
 	}
 	log.Info("connected to database")
 
+	// Connect to Redis
+	var redisIdempotency *middleware.RedisIdempotency
+	if cfg.Redis.RedisURL != "" {
+		rdb := redis.NewClient(&redis.Options{Addr: cfg.Redis.RedisURL})
+		if rdb.Ping(ctx).Err() == nil {
+			redisIdempotency = middleware.NewRedisIdempotency(rdb, 24*time.Hour, "idempotency")
+		}
+	}
+
 	// gRPC clients with circuit breaker + retry
 	accountConn, _ := grpc.NewClient(cfg.Service.AccountGRPCAddr,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
@@ -62,7 +73,7 @@ func main() {
 
 	// Construct dependency graph
 	paymentRepo := repository.NewPaymentRepository(pool)
-	paymentSrv := app.NewPaymentService(paymentRepo, accountClient, ledgerClient)
+	paymentSrv := app.NewPaymentService(paymentRepo, accountClient, ledgerClient, redisIdempotency)
 
 	// Set up gRPC server
 	grpcServer := grpc.NewServer(middleware.UnaryServerChain(log))
