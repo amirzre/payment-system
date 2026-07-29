@@ -13,6 +13,7 @@ type Config struct {
 	Service  ServiceConfig
 	Database DatabaseConfig
 	Redis    RedisConfig
+	Nats     NatsConfig
 }
 
 // ServerConfig holds server configuration.
@@ -36,6 +37,11 @@ type RedisConfig struct {
 	RedisURL string
 }
 
+// NatsConfig holds Nats configuration.
+type NatsConfig struct {
+	NatsURL string
+}
+
 // Load loads configuration from environment variables.
 func Load() *Config {
 	_ = godotenv.Load()
@@ -53,6 +59,9 @@ func Load() *Config {
 		},
 		RedisConfig{
 			RedisURL: getEnv("REDIS_URL", "redis://localhost:6379/0"),
+		},
+		NatsConfig{
+			NatsURL: getEnv("NATS_URL", "nats://localhost:4222"),
 		},
 	}
 }

@@ -67,6 +67,26 @@ services:
       timeout: 5s
       retries: 5
 
+  redis:
+    image: redis:8-alpine
+    container_name: redis
+    ports: ["6379:6379"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  nats:
+    image: nats:2.14-alpine
+    command: "-js"
+    ports: ["4222:4222", "8222:8222"]
+    healthcheck:
+      test: ["CMD", "nats", "server", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5  
+
   pgadmin:
     image: dpage/pgadmin4:latest
     container_name: pgadmin
