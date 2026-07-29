@@ -8,12 +8,15 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	ledgerv1 "github.com/amirzre/payment-system/gen/go/ledger/v1"
 	"github.com/amirzre/payment-system/services/ledger/internal/app"
 	"github.com/amirzre/payment-system/services/ledger/internal/config"
 	"github.com/amirzre/payment-system/services/ledger/internal/repository"
+	ledgerconsumer "github.com/amirzre/payment-system/services/ledger/internal/transport/consumer"
 	ledgertransport "github.com/amirzre/payment-system/services/ledger/internal/transport/grpc"
+	"github.com/amirzre/payment-system/shared/eventbus"
 	"github.com/amirzre/payment-system/shared/logger"
 	"github.com/amirzre/payment-system/shared/middleware"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -44,10 +47,31 @@ func main() {
 	}
 	log.Info("connected to database")
 
+	// Connect to NATS
+	var eb *eventbus.NatsEventBus
+	if cfg.Nats.NatsURL != "" {
+		var err error
+		eb, err = eventbus.NewNatsEventBus(cfg.Nats.NatsURL, log)
+		if err != nil {
+			log.Warn("NATS unavailable", slog.Any("error", err))
+		} else {
+			defer eb.Close()
+		}
+	}
+
 	// Construct dependency graph
 	ledgerRepo := repository.NewLedgerRepository(pool)
 	ledgerSrv := app.NewLedgerEntryService(ledgerRepo)
 	ledgerServer := ledgertransport.NewLedgerServer(ledgerSrv)
+
+	// Outbox + consumers
+	if eb != nil {
+		go eventbus.RunOutboxPublisher(context.Background(), pool, eb, log, 1*time.Second)
+
+		fundsHandler := eventbus.WithIdempotency(pool, "ledger-funds-reserved",
+			ledgerconsumer.FundsReservedHandler(ledgerSrv, eb, log))
+		eb.Subscribe(context.Background(), "funds.reserved", "ledger-service", fundsHandler)
+	}
 
 	// Set up gRPC server
 	grpcServer := grpc.NewServer(middleware.UnaryServerChain(log))

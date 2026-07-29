@@ -40,7 +40,7 @@ func Load() *Config {
 			GRPCPort:    getIntEnv("SERVER_PORT", 50052),
 		},
 		NATSConfig{
-			NatsURL: getEnv("NATS_ADDR", "nats://nats:4222"),
+			NatsURL: getEnv("NATS_ADDR", "nats://localhost:4222"),
 		},
 		DatabaseConfig{
 			DatabaseURL: getEnv("DATABASE_URL", "postgres://postgres:postgresql@localhost:5433/ledger?sslmode=disable"),

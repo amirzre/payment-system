@@ -16,7 +16,9 @@ import (
 	"github.com/amirzre/payment-system/services/payment/internal/app"
 	"github.com/amirzre/payment-system/services/payment/internal/config"
 	"github.com/amirzre/payment-system/services/payment/internal/repository"
+	paymentconsumer "github.com/amirzre/payment-system/services/payment/internal/transport/consumer"
 	paymentgrpc "github.com/amirzre/payment-system/services/payment/internal/transport/grpc"
+	"github.com/amirzre/payment-system/shared/eventbus"
 	"github.com/amirzre/payment-system/shared/logger"
 	"github.com/amirzre/payment-system/shared/middleware"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -58,15 +60,36 @@ func main() {
 		}
 	}
 
+	// Connect to NATS
+	var eb *eventbus.NatsEventBus
+	if cfg.Nats.NatsURL != "" {
+		var err error
+		eb, err = eventbus.NewNatsEventBus(cfg.Nats.NatsURL, log)
+		if err != nil {
+			log.Warn("NATS unavailable, event-driven saga disabled", slog.Any("error", err))
+		} else {
+			defer eb.Close()
+			log.Info("connected to NATS")
+		}
+	}
+
 	// gRPC clients with circuit breaker + retry
 	accountConn, _ := grpc.NewClient(cfg.Service.AccountGRPCAddr,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithChainUnaryInterceptor(
+			middleware.UnaryClientCircuitBreaker(middleware.DefaultCircuitBreakerConfig()),
+			middleware.UnaryClientRetry(middleware.DefaultRetryConfig()),
+		),
 	)
 	defer accountConn.Close()
 	accountClient := accountv1.NewAccountServiceClient(accountConn)
 
 	ledgerConn, _ := grpc.NewClient(cfg.Service.LedgerGRPCAddr,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithChainUnaryInterceptor(
+			middleware.UnaryClientCircuitBreaker(middleware.DefaultCircuitBreakerConfig()),
+			middleware.UnaryClientRetry(middleware.DefaultRetryConfig()),
+		),
 	)
 	defer ledgerConn.Close()
 	ledgerClient := ledgerv1.NewLedgerServiceClient(ledgerConn)
@@ -74,6 +97,20 @@ func main() {
 	// Construct dependency graph
 	paymentRepo := repository.NewPaymentRepository(pool)
 	paymentSrv := app.NewPaymentService(paymentRepo, accountClient, ledgerClient, redisIdempotency)
+
+	// Outbox publisher
+	if eb != nil {
+		go eventbus.RunOutboxPublisher(context.Background(), pool, eb, log, 1*time.Second)
+
+		// Event consumers with idempotency
+		ledgerPostedHandler := eventbus.WithIdempotency(pool, "payment-ledger-posted",
+			paymentconsumer.LedgerPostedHandler(paymentRepo, log))
+		eb.Subscribe(context.Background(), "ledger.posted", "payment-service", ledgerPostedHandler)
+
+		fundsFailHandler := eventbus.WithIdempotency(pool, "payment-funds-failed",
+			paymentconsumer.FundsReservationFailedHandler(paymentRepo, log))
+		eb.Subscribe(context.Background(), "funds.reservation.failed", "payment-service", fundsFailHandler)
+	}
 
 	// Set up gRPC server
 	grpcServer := grpc.NewServer(middleware.UnaryServerChain(log))

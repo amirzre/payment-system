@@ -8,13 +8,16 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	accountv1 "github.com/amirzre/payment-system/gen/go/account/v1"
 	ledgerv1 "github.com/amirzre/payment-system/gen/go/ledger/v1"
 	"github.com/amirzre/payment-system/services/account/internal/app"
 	"github.com/amirzre/payment-system/services/account/internal/config"
 	"github.com/amirzre/payment-system/services/account/internal/repository"
+	accountconsumer "github.com/amirzre/payment-system/services/account/internal/transport/consumer"
 	accounttransport "github.com/amirzre/payment-system/services/account/internal/transport/grpc"
+	"github.com/amirzre/payment-system/shared/eventbus"
 	"github.com/amirzre/payment-system/shared/logger"
 	"github.com/amirzre/payment-system/shared/middleware"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -56,9 +59,25 @@ func main() {
 		}
 	}
 
+	// Connect to Nats
+	var eb *eventbus.NatsEventBus
+	if cfg.Nats.NatsURL != "" {
+		var err error
+		eb, err = eventbus.NewNatsEventBus(cfg.Nats.NatsURL, log)
+		if err != nil {
+			log.Warn("NATS unavailable", slog.Any("error", err))
+		} else {
+			defer eb.Close()
+		}
+	}
+
 	// gRPC client to ledger-service
 	ledgerConn, _ := grpc.NewClient(cfg.Service.LedgerGRPCAddr,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithChainUnaryInterceptor(
+			middleware.UnaryClientCircuitBreaker(middleware.DefaultCircuitBreakerConfig()),
+			middleware.UnaryClientRetry(middleware.DefaultRetryConfig()),
+		),
 	)
 	defer ledgerConn.Close()
 	ledgerClient := ledgerv1.NewLedgerServiceClient(ledgerConn)
@@ -67,6 +86,23 @@ func main() {
 	accountRepo := repository.NewAccountRepository(pool)
 	accountSrv := app.NewAccountService(accountRepo, ledgerClient, rdb)
 	accountServer := accounttransport.NewAccountServer(accountSrv)
+
+	// Outbox + consumers
+	if eb != nil {
+		go eventbus.RunOutboxPublisher(context.Background(), pool, eb, log, 1*time.Second)
+
+		selfConn, _ := grpc.NewClient(fmt.Sprintf("localhost:%d", cfg.Server.GRPCPort),
+			grpc.WithTransportCredentials(insecure.NewCredentials()))
+		selfClient := accountv1.NewAccountServiceClient(selfConn)
+
+		payReqHandler := eventbus.WithIdempotency(pool, "account-payment-requested",
+			accountconsumer.PaymentRequestedHandler(selfClient, eb, log))
+		eb.Subscribe(context.Background(), "payment.requested", "account-service", payReqHandler)
+
+		cacheHandler := eventbus.WithIdempotency(pool, "account-cache-invalidation",
+			accountconsumer.CacheInvalidationHandler(rdb, log))
+		eb.Subscribe(context.Background(), "ledger.posted", "account-service-cache", cacheHandler)
+	}
 
 	// Set up gRPC server
 	grpcServer := grpc.NewServer(middleware.UnaryServerChain(log))

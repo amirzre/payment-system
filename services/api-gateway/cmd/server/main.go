@@ -15,6 +15,7 @@ import (
 	"github.com/amirzre/payment-system/services/api-gateway/internal/config"
 	gatewayhttp "github.com/amirzre/payment-system/services/api-gateway/internal/transport/http"
 	"github.com/amirzre/payment-system/shared/logger"
+	"github.com/amirzre/payment-system/shared/middleware"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 )
@@ -30,18 +31,30 @@ func main() {
 	// gRPC connections
 	accountConn, _ := grpc.NewClient(cfg.Service.AccountGRPCAddr,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithChainUnaryInterceptor(
+			middleware.UnaryClientCircuitBreaker(middleware.DefaultCircuitBreakerConfig()),
+			middleware.UnaryClientRetry(middleware.DefaultRetryConfig()),
+		),
 	)
 	defer accountConn.Close()
 	accountClient := accountv1.NewAccountServiceClient(accountConn)
 
 	paymentConn, _ := grpc.NewClient(cfg.Service.PaymentGRPCAddr,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithChainUnaryInterceptor(
+			middleware.UnaryClientCircuitBreaker(middleware.DefaultCircuitBreakerConfig()),
+			middleware.UnaryClientRetry(middleware.DefaultRetryConfig()),
+		),
 	)
 	defer paymentConn.Close()
 	paymentClient := paymentv1.NewPaymentServiceClient(paymentConn)
 
 	authConn, _ := grpc.NewClient(cfg.Service.AuthGRPCAddr,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithChainUnaryInterceptor(
+			middleware.UnaryClientCircuitBreaker(middleware.DefaultCircuitBreakerConfig()),
+			middleware.UnaryClientRetry(middleware.DefaultRetryConfig()),
+		),
 	)
 	defer authConn.Close()
 	authClient := authv1.NewAuthServiceClient(authConn)
