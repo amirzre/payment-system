@@ -74,6 +74,10 @@ func main() {
 	// gRPC client to ledger-service
 	ledgerConn, _ := grpc.NewClient(cfg.Service.LedgerGRPCAddr,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithChainUnaryInterceptor(
+			middleware.UnaryClientCircuitBreaker(middleware.DefaultCircuitBreakerConfig()),
+			middleware.UnaryClientRetry(middleware.DefaultRetryConfig()),
+		),
 	)
 	defer ledgerConn.Close()
 	ledgerClient := ledgerv1.NewLedgerServiceClient(ledgerConn)

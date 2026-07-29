@@ -76,12 +76,20 @@ func main() {
 	// gRPC clients with circuit breaker + retry
 	accountConn, _ := grpc.NewClient(cfg.Service.AccountGRPCAddr,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithChainUnaryInterceptor(
+			middleware.UnaryClientCircuitBreaker(middleware.DefaultCircuitBreakerConfig()),
+			middleware.UnaryClientRetry(middleware.DefaultRetryConfig()),
+		),
 	)
 	defer accountConn.Close()
 	accountClient := accountv1.NewAccountServiceClient(accountConn)
 
 	ledgerConn, _ := grpc.NewClient(cfg.Service.LedgerGRPCAddr,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithChainUnaryInterceptor(
+			middleware.UnaryClientCircuitBreaker(middleware.DefaultCircuitBreakerConfig()),
+			middleware.UnaryClientRetry(middleware.DefaultRetryConfig()),
+		),
 	)
 	defer ledgerConn.Close()
 	ledgerClient := ledgerv1.NewLedgerServiceClient(ledgerConn)
