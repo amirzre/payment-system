@@ -1,4 +1,4 @@
-.PHONY: proto-gen proto-lint build test test-race work-sync
+.PHONY: proto-gen proto-lint build test test-race work-sync tidy
 
 # Generate protobuf code
 proto-gen:
@@ -13,6 +13,15 @@ build:
 	cd services/account && go build ./cmd/server/...
 	cd services/ledger && go build ./cmd/server/...
 	cd services/payment && go build ./cmd/server/...
+
+# Run go mod tidy
+tidy:
+	cd services/account && go mod tidy
+	cd services/api-gateway && go mod tidy
+	cd services/auth && go mod tidy
+	cd services/ledger && go mod tidy
+	cd services/payment && go mod tidy
+	cd shared && go mod tidy
 
 # Run all tests (unit + integration)
 test-all:
