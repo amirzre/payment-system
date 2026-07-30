@@ -1,0 +1,40 @@
+# Git
+.git/
+.gitignore
+
+# IDE / Editor
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Build artifacts
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+
+# Environment files
+.env
+.env.*
+
+# Documentation
+README.md
+LICENSE
+
+# Docker
+Dockerfile*
+docker-compose*
+.dockerignore
+deploy/
+
+# Test and coverage
+coverage.*
+*.coverprofile
+profile.cov
+
+# macOS
+.DS_Store
