@@ -1,0 +1,101 @@
+name: Service CI
+
+on:
+  workflow_call:
+    inputs:
+      service:
+        required: true
+        type: string
+        description: "Service name (account, api-gateway, auth, ledger, payment)"
+      context:
+        required: true
+        type: string
+        description: "Path to the service directory (services/account)"
+      integration:
+        required: false
+        type: boolean
+        default: false
+        description: "Whether this service has integration tests"
+
+jobs:
+  ci:
+    name: ${{ inputs.service }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_USER: ci
+          POSTGRES_PASSWORD: ci
+          POSTGRES_DB: ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ci -d ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+
+      redis:
+        image: redis:8-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+
+      nats:
+        image: nats:2.14-alpine
+        ports:
+          - 4222:4222
+        options: >-
+          --health-cmd "wget -qO- http://localhost:8222/healthz"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+          cache: false
+
+      - name: Lint
+        run: |
+          go vet ./shared/...
+          go vet ./gen/go/...
+          go vet ./${{ inputs.context }}/...
+
+      - name: Unit tests
+        env:
+          DATABASE_URL: postgres://ci:ci@localhost:5432/ci?sslmode=disable
+          REDIS_URL: redis://localhost:6379/0
+          NATS_URL: nats://localhost:4222
+          SERVER_ENVIRONMENT: ci
+        run: |
+          go test ./shared/... -v -race -count=1 -coverprofile=shared.cover -covermode=atomic
+          go test ./${{ inputs.context }}/... -v -race -count=1 -coverprofile=service.cover -covermode=atomic
+
+      - name: Integration tests
+        if: ${{ inputs.integration }}
+        env:
+          DATABASE_URL: postgres://ci:ci@localhost:5432/ci?sslmode=disable
+          REDIS_URL: redis://localhost:6379/0
+          NATS_URL: nats://localhost:4222
+          SERVER_ENVIRONMENT: ci
+        run: |
+          echo "No integration tests defined yet for ${{ inputs.service }}"
+          exit 0
+
+      - name: Docker build
+        run: |
+          docker build \
+            -f ${{ inputs.context }}/Dockerfile \
+            -t payment-system/${{ inputs.service }}:ci \
+            .
