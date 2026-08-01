@@ -125,45 +125,45 @@ generate-keys: ## Generate RSA key pair for JWT signing
 ci: ci-shared ci-account ci-api-gateway ci-auth ci-ledger ci-payment ## Run full CI pipeline locally
 
 ci-account: ## CI: lint → test → docker build (account)
-	cd shared        && go vet ./...
-	cd gen/go        && go vet ./...
-	cd services/account && go vet ./...
-	cd shared        && go test ./... -race -count=1
-	cd services/account && go test ./... -race -count=1
+	(cd shared && go mod download && go vet ./...)
+	(cd gen/go && go mod download && go vet ./...)
+	(cd services/account && go mod download && go vet ./...)
+	(cd shared && go test ./... -race -count=1)
+	(cd services/account && go test ./... -race -count=1)
 	docker build -f services/account/Dockerfile -t payment-system/account:ci .
 
 ci-api-gateway: ## CI: lint → test → docker build (api-gateway)
-	cd shared              && go vet ./...
-	cd gen/go              && go vet ./...
-	cd services/api-gateway&& go vet ./...
-	cd shared              && go test ./... -race -count=1
-	cd services/api-gateway&& go test ./... -race -count=1
+	(cd shared && go mod download && go vet ./...)
+	(cd gen/go && go mod download && go vet ./...)
+	(cd services/api-gateway && go mod download && go vet ./...)
+	(cd shared && go test ./... -race -count=1)
+	(cd services/api-gateway && go test ./... -race -count=1)
 	docker build -f services/api-gateway/Dockerfile -t payment-system/api-gateway:ci .
 
 ci-auth: ## CI: lint → test → docker build (auth)
-	cd shared       && go vet ./...
-	cd gen/go       && go vet ./...
-	cd services/auth&& go vet ./...
-	cd shared       && go test ./... -race -count=1
-	cd services/auth&& go test ./... -race -count=1
+	(cd shared && go mod download && go vet ./...)
+	(cd gen/go && go mod download && go vet ./...)
+	(cd services/auth && go mod download && go vet ./...)
+	(cd shared && go test ./... -race -count=1)
+	(cd services/auth && go test ./... -race -count=1)
 	docker build -f services/auth/Dockerfile -t payment-system/auth:ci .
 
 ci-ledger: ## CI: lint → test → docker build (ledger)
-	cd shared         && go vet ./...
-	cd gen/go         && go vet ./...
-	cd services/ledger&& go vet ./...
-	cd shared         && go test ./... -race -count=1
-	cd services/ledger&& go test ./... -race -count=1
+	(cd shared && go mod download && go vet ./...)
+	(cd gen/go && go mod download && go vet ./...)
+	(cd services/ledger && go mod download && go vet ./...)
+	(cd shared && go test ./... -race -count=1)
+	(cd services/ledger && go test ./... -race -count=1)
 	docker build -f services/ledger/Dockerfile -t payment-system/ledger:ci .
 
 ci-payment: ## CI: lint → test → docker build (payment)
-	cd shared          && go vet ./...
-	cd gen/go          && go vet ./...
-	cd services/payment&& go vet ./...
-	cd shared          && go test ./... -race -count=1
-	cd services/payment&& go test ./... -race -count=1
+	(cd shared && go mod download && go vet ./...)
+	(cd gen/go && go mod download && go vet ./...)
+	(cd services/payment && go mod download && go vet ./...)
+	(cd shared && go test ./... -race -count=1)
+	(cd services/payment && go test ./... -race -count=1)
 	docker build -f services/payment/Dockerfile -t payment-system/payment:ci .
 
 ci-shared: ## CI: lint → test (shared)
-	cd shared && go vet ./...
-	cd shared && go test ./... -race -count=1
+	(cd shared && go mod download && go vet ./...)
+	(cd shared && go test ./... -race -count=1)
