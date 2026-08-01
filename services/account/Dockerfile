@@ -4,23 +4,24 @@ RUN apk add --no-cache ca-certificates git tzdata
 
 WORKDIR /src
 
-COPY go.work go.work.sum ./
 COPY shared/go.mod shared/go.sum ./shared/
 COPY gen/go/go.mod gen/go/go.sum ./gen/go/
 COPY services/account/go.mod services/account/go.sum ./services/account/
 
-RUN go work sync
+RUN cd services/account && go mod download
 
 COPY shared/ ./shared/
 COPY gen/go/ ./gen/go/
 COPY services/account/ ./services/account/
+
+WORKDIR /src/services/account
 
 ARG TARGETOS=linux
 ARG TARGETARCH=amd64
 RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
     go build -ldflags="-w -s -extldflags=-static" \
     -o /out/account-service \
-    ./services/account/cmd/server/
+    ./cmd/server/
 
 FROM alpine:3.23
 
