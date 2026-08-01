@@ -8,6 +8,7 @@ service AccountService {
   rpc CreateAccount(CreateAccountRequest) returns (CreateAccountResponse);
   rpc GetAccount(GetAccountRequest) returns (GetAccountResponse);
   rpc GetBalance(GetBalanceRequest) returns (GetBalanceResponse);
+  rpc Deposit(DepositRequest) returns (DepositResponse);
 }
 
 message Account {
@@ -40,6 +41,18 @@ message GetBalanceRequest {
 }
 
 message GetBalanceResponse {
+  string account_id = 1;
+  int64 balance_minor = 2;
+  string currency = 3;
+}
+
+message DepositRequest {
+  string account_id = 1;
+  int64 amount_minor = 2;
+  string currency = 3;
+}
+
+message DepositResponse {
   string account_id = 1;
   int64 balance_minor = 2;
   string currency = 3;

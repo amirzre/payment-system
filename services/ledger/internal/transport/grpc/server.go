@@ -113,3 +113,28 @@ func (s *LedgerServer) GetBalance(ctx context.Context, req *ledgerv1.GetBalanceR
 		BalanceMinor: balance,
 	}, nil
 }
+
+// Deposit handles the Deposit gRPC request (single credit entry).
+func (s *LedgerServer) Deposit(ctx context.Context, req *ledgerv1.DepositRequest) (*ledgerv1.DepositResponse, error) {
+	accountID, err := uuid.Parse(req.GetAccountId())
+	if err != nil {
+		return nil, sharederrors.ToGRPCStatus(
+			sharederrors.New(sharederrors.KindInvalidArgument, "invalid account_id"),
+		)
+	}
+
+	balance, err := s.service.Deposit(ctx, app.DepositInput{
+		AccountID:   accountID,
+		AmountMinor: req.GetAmountMinor(),
+		Currency:    req.GetCurrency(),
+	})
+	if err != nil {
+		return nil, sharederrors.ToGRPCStatus(err)
+	}
+
+	return &ledgerv1.DepositResponse{
+		AccountId:    accountID.String(),
+		BalanceMinor: balance,
+		Currency:     req.GetCurrency(),
+	}, nil
+}

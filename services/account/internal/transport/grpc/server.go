@@ -55,6 +55,48 @@ func (s *AccountServer) GetAccount(ctx context.Context, req *accountv1.GetAccoun
 	}, nil
 }
 
+// GetBalance handles the GetBalance gRPC request.
+func (s *AccountServer) GetBalance(ctx context.Context, req *accountv1.GetBalanceRequest) (*accountv1.GetBalanceResponse, error) {
+	accountID, err := uuid.Parse(req.GetAccountId())
+	if err != nil {
+		return nil, sharederrors.ToGRPCStatus(
+			sharederrors.New(sharederrors.KindInvalidArgument, "invalid account_id"),
+		)
+	}
+
+	balance, err := s.service.GetBalance(ctx, accountID)
+	if err != nil {
+		return nil, sharederrors.ToGRPCStatus(err)
+	}
+
+	return &accountv1.GetBalanceResponse{
+		AccountId:    accountID.String(),
+		BalanceMinor: balance.BalanceMinor,
+		Currency:     balance.Currency,
+	}, nil
+}
+
+// Deposit handles the Deposit gRPC request.
+func (s *AccountServer) Deposit(ctx context.Context, req *accountv1.DepositRequest) (*accountv1.DepositResponse, error) {
+	accountID, err := uuid.Parse(req.GetAccountId())
+	if err != nil {
+		return nil, sharederrors.ToGRPCStatus(
+			sharederrors.New(sharederrors.KindInvalidArgument, "invalid account_id"),
+		)
+	}
+
+	balance, err := s.service.Deposit(ctx, accountID, req.GetAmountMinor(), req.GetCurrency())
+	if err != nil {
+		return nil, sharederrors.ToGRPCStatus(err)
+	}
+
+	return &accountv1.DepositResponse{
+		AccountId:    accountID.String(),
+		BalanceMinor: balance.BalanceMinor,
+		Currency:     balance.Currency,
+	}, nil
+}
+
 // domainToProto converts a domain Account to its proto representation.
 func domainToProto(a *domain.Account) *accountv1.Account {
 	return &accountv1.Account{

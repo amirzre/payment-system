@@ -385,6 +385,126 @@ func (x *GetBalanceResponse) GetCurrency() string {
 	return ""
 }
 
+type DepositRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	AccountId     string                 `protobuf:"bytes,1,opt,name=account_id,json=accountId,proto3" json:"account_id,omitempty"`
+	AmountMinor   int64                  `protobuf:"varint,2,opt,name=amount_minor,json=amountMinor,proto3" json:"amount_minor,omitempty"`
+	Currency      string                 `protobuf:"bytes,3,opt,name=currency,proto3" json:"currency,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DepositRequest) Reset() {
+	*x = DepositRequest{}
+	mi := &file_account_v1_account_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DepositRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DepositRequest) ProtoMessage() {}
+
+func (x *DepositRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_account_v1_account_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DepositRequest.ProtoReflect.Descriptor instead.
+func (*DepositRequest) Descriptor() ([]byte, []int) {
+	return file_account_v1_account_proto_rawDescGZIP(), []int{7}
+}
+
+func (x *DepositRequest) GetAccountId() string {
+	if x != nil {
+		return x.AccountId
+	}
+	return ""
+}
+
+func (x *DepositRequest) GetAmountMinor() int64 {
+	if x != nil {
+		return x.AmountMinor
+	}
+	return 0
+}
+
+func (x *DepositRequest) GetCurrency() string {
+	if x != nil {
+		return x.Currency
+	}
+	return ""
+}
+
+type DepositResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	AccountId     string                 `protobuf:"bytes,1,opt,name=account_id,json=accountId,proto3" json:"account_id,omitempty"`
+	BalanceMinor  int64                  `protobuf:"varint,2,opt,name=balance_minor,json=balanceMinor,proto3" json:"balance_minor,omitempty"`
+	Currency      string                 `protobuf:"bytes,3,opt,name=currency,proto3" json:"currency,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DepositResponse) Reset() {
+	*x = DepositResponse{}
+	mi := &file_account_v1_account_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DepositResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DepositResponse) ProtoMessage() {}
+
+func (x *DepositResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_account_v1_account_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DepositResponse.ProtoReflect.Descriptor instead.
+func (*DepositResponse) Descriptor() ([]byte, []int) {
+	return file_account_v1_account_proto_rawDescGZIP(), []int{8}
+}
+
+func (x *DepositResponse) GetAccountId() string {
+	if x != nil {
+		return x.AccountId
+	}
+	return ""
+}
+
+func (x *DepositResponse) GetBalanceMinor() int64 {
+	if x != nil {
+		return x.BalanceMinor
+	}
+	return 0
+}
+
+func (x *DepositResponse) GetCurrency() string {
+	if x != nil {
+		return x.Currency
+	}
+	return ""
+}
+
 var File_account_v1_account_proto protoreflect.FileDescriptor
 
 const file_account_v1_account_proto_rawDesc = "" +
@@ -414,13 +534,24 @@ const file_account_v1_account_proto_rawDesc = "" +
 	"\n" +
 	"account_id\x18\x01 \x01(\tR\taccountId\x12#\n" +
 	"\rbalance_minor\x18\x02 \x01(\x03R\fbalanceMinor\x12\x1a\n" +
-	"\bcurrency\x18\x03 \x01(\tR\bcurrency2\x80\x02\n" +
+	"\bcurrency\x18\x03 \x01(\tR\bcurrency\"n\n" +
+	"\x0eDepositRequest\x12\x1d\n" +
+	"\n" +
+	"account_id\x18\x01 \x01(\tR\taccountId\x12!\n" +
+	"\famount_minor\x18\x02 \x01(\x03R\vamountMinor\x12\x1a\n" +
+	"\bcurrency\x18\x03 \x01(\tR\bcurrency\"q\n" +
+	"\x0fDepositResponse\x12\x1d\n" +
+	"\n" +
+	"account_id\x18\x01 \x01(\tR\taccountId\x12#\n" +
+	"\rbalance_minor\x18\x02 \x01(\x03R\fbalanceMinor\x12\x1a\n" +
+	"\bcurrency\x18\x03 \x01(\tR\bcurrency2\xc4\x02\n" +
 	"\x0eAccountService\x12T\n" +
 	"\rCreateAccount\x12 .account.v1.CreateAccountRequest\x1a!.account.v1.CreateAccountResponse\x12K\n" +
 	"\n" +
 	"GetAccount\x12\x1d.account.v1.GetAccountRequest\x1a\x1e.account.v1.GetAccountResponse\x12K\n" +
 	"\n" +
-	"GetBalance\x12\x1d.account.v1.GetBalanceRequest\x1a\x1e.account.v1.GetBalanceResponseB\xa6\x01\n" +
+	"GetBalance\x12\x1d.account.v1.GetBalanceRequest\x1a\x1e.account.v1.GetBalanceResponse\x12B\n" +
+	"\aDeposit\x12\x1a.account.v1.DepositRequest\x1a\x1b.account.v1.DepositResponseB\xa6\x01\n" +
 	"\x0ecom.account.v1B\fAccountProtoP\x01Z=github.com/amirzre/payment-system/gen/go/account/v1;accountv1\xa2\x02\x03AXX\xaa\x02\n" +
 	"Account.V1\xca\x02\n" +
 	"Account\\V1\xe2\x02\x16Account\\V1\\GPBMetadata\xea\x02\vAccount::V1b\x06proto3"
@@ -437,7 +568,7 @@ func file_account_v1_account_proto_rawDescGZIP() []byte {
 	return file_account_v1_account_proto_rawDescData
 }
 
-var file_account_v1_account_proto_msgTypes = make([]protoimpl.MessageInfo, 7)
+var file_account_v1_account_proto_msgTypes = make([]protoimpl.MessageInfo, 9)
 var file_account_v1_account_proto_goTypes = []any{
 	(*Account)(nil),               // 0: account.v1.Account
 	(*CreateAccountRequest)(nil),  // 1: account.v1.CreateAccountRequest
@@ -446,6 +577,8 @@ var file_account_v1_account_proto_goTypes = []any{
 	(*GetAccountResponse)(nil),    // 4: account.v1.GetAccountResponse
 	(*GetBalanceRequest)(nil),     // 5: account.v1.GetBalanceRequest
 	(*GetBalanceResponse)(nil),    // 6: account.v1.GetBalanceResponse
+	(*DepositRequest)(nil),        // 7: account.v1.DepositRequest
+	(*DepositResponse)(nil),       // 8: account.v1.DepositResponse
 }
 var file_account_v1_account_proto_depIdxs = []int32{
 	0, // 0: account.v1.CreateAccountResponse.account:type_name -> account.v1.Account
@@ -453,11 +586,13 @@ var file_account_v1_account_proto_depIdxs = []int32{
 	1, // 2: account.v1.AccountService.CreateAccount:input_type -> account.v1.CreateAccountRequest
 	3, // 3: account.v1.AccountService.GetAccount:input_type -> account.v1.GetAccountRequest
 	5, // 4: account.v1.AccountService.GetBalance:input_type -> account.v1.GetBalanceRequest
-	2, // 5: account.v1.AccountService.CreateAccount:output_type -> account.v1.CreateAccountResponse
-	4, // 6: account.v1.AccountService.GetAccount:output_type -> account.v1.GetAccountResponse
-	6, // 7: account.v1.AccountService.GetBalance:output_type -> account.v1.GetBalanceResponse
-	5, // [5:8] is the sub-list for method output_type
-	2, // [2:5] is the sub-list for method input_type
+	7, // 5: account.v1.AccountService.Deposit:input_type -> account.v1.DepositRequest
+	2, // 6: account.v1.AccountService.CreateAccount:output_type -> account.v1.CreateAccountResponse
+	4, // 7: account.v1.AccountService.GetAccount:output_type -> account.v1.GetAccountResponse
+	6, // 8: account.v1.AccountService.GetBalance:output_type -> account.v1.GetBalanceResponse
+	8, // 9: account.v1.AccountService.Deposit:output_type -> account.v1.DepositResponse
+	6, // [6:10] is the sub-list for method output_type
+	2, // [2:6] is the sub-list for method input_type
 	2, // [2:2] is the sub-list for extension type_name
 	2, // [2:2] is the sub-list for extension extendee
 	0, // [0:2] is the sub-list for field type_name
@@ -474,7 +609,7 @@ func file_account_v1_account_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_account_v1_account_proto_rawDesc), len(file_account_v1_account_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   7,
+			NumMessages:   9,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
