@@ -68,9 +68,9 @@ jobs:
 
       - name: Lint
         run: |
-          cd shared && go vet ./...
-          cd gen/go && go vet ./...
-          cd ${{ inputs.context }} && go vet ./...
+          (cd shared && go vet ./...)
+          (cd gen/go && go vet ./...)
+          (cd ${{ inputs.context }} && go vet ./...)
 
       - name: Unit tests
         env:
@@ -79,8 +79,8 @@ jobs:
           NATS_URL: nats://localhost:4222
           SERVER_ENVIRONMENT: ci
         run: |
-          cd shared && go test ./... -v -race -count=1 -coverprofile=../shared.cover -covermode=atomic
-          cd ${{ inputs.context }} && go test ./... -v -race -count=1 -coverprofile=../service.cover -covermode=atomic
+          (cd shared && go test ./... -v -race -count=1 -coverprofile=../shared.cover -covermode=atomic)
+          (cd ${{ inputs.context }} && go test ./... -v -race -count=1 -coverprofile=../service.cover -covermode=atomic)
 
       - name: Integration tests
         if: ${{ inputs.integration }}
