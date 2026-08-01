@@ -86,8 +86,9 @@ func main() {
 		r.URL.Path = "/v1/payments/" + r.PathValue("id")
 		paymentHandler.GetPayment(w, r)
 	})
+	protected.HandleFunc("POST /v1/accounts/{id}/deposit", accountHandler.Deposit)
 
-	var protectedHandler http.Handler = protected
+	var protectedHandler http.Handler = gatewayhttp.AuthMiddleware(authClient)(protected)
 
 	mux.Handle("/v1/accounts", protectedHandler)
 	mux.Handle("/v1/accounts/", protectedHandler)

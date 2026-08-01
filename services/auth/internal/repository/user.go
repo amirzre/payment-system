@@ -43,7 +43,7 @@ func (r *userRepository) Create(ctx context.Context, user *domain.User) error {
 // GetByEmail retrieves a user by email.
 func (r *userRepository) GetByEmail(ctx context.Context, email string) (*domain.User, error) {
 	query := `
-		SELECT id, email, created_at
+		SELECT id, email, password_hash, created_at
 		FROM users
 		WHERE email = $1
 	`
@@ -51,6 +51,7 @@ func (r *userRepository) GetByEmail(ctx context.Context, email string) (*domain.
 	err := r.pool.QueryRow(ctx, query, email).Scan(
 		&user.ID,
 		&user.Email,
+		&user.PasswordHash,
 		&user.CreatedAt,
 	)
 	if err != nil {

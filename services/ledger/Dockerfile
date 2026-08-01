@@ -4,23 +4,24 @@ RUN apk add --no-cache ca-certificates git tzdata
 
 WORKDIR /src
 
-COPY go.work go.work.sum ./
 COPY shared/go.mod shared/go.sum ./shared/
 COPY gen/go/go.mod gen/go/go.sum ./gen/go/
 COPY services/ledger/go.mod services/ledger/go.sum ./services/ledger/
 
-RUN go work sync
+RUN cd services/ledger && go mod download
 
 COPY shared/ ./shared/
 COPY gen/go/ ./gen/go/
 COPY services/ledger/ ./services/ledger/
+
+WORKDIR /src/services/ledger
 
 ARG TARGETOS=linux
 ARG TARGETARCH=amd64
 RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} \
     go build -ldflags="-w -s -extldflags=-static" \
     -o /out/ledger-service \
-    ./services/ledger/cmd/server/
+    ./cmd/server/
 
 FROM alpine:3.23
 

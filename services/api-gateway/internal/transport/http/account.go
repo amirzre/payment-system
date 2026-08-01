@@ -76,3 +76,40 @@ func (h *AccountHandler) GetAccount(w http.ResponseWriter, r *http.Request) {
 		"created_at": resp.Account.GetCreatedAt(),
 	})
 }
+
+// Deposit handles POST /v1/accounts/{id}/deposit.
+func (h *AccountHandler) Deposit(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if id == "" {
+		writeError(w, http.StatusBadRequest, "INVALID_REQUEST", "account id is required")
+		return
+	}
+
+	var req struct {
+		AmountMinor int64  `json:"amount_minor"`
+		Currency    string `json:"currency"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "INVALID_REQUEST", "invalid JSON body")
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+
+	resp, err := h.client.Deposit(ctx, &accountv1.DepositRequest{
+		AccountId:   id,
+		AmountMinor: req.AmountMinor,
+		Currency:    req.Currency,
+	})
+	if err != nil {
+		writeGRPCError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"account_id":    resp.GetAccountId(),
+		"balance_minor": resp.GetBalanceMinor(),
+		"currency":      resp.GetCurrency(),
+	})
+}

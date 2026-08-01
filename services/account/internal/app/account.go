@@ -32,6 +32,7 @@ type AccountService interface {
 	Create(ctx context.Context, accountReq CreateAccountReq) (*domain.Account, error)
 	GetByID(ctx context.Context, id uuid.UUID) (*domain.Account, error)
 	GetBalance(ctx context.Context, accountID uuid.UUID) (*BalanceResponse, error)
+	Deposit(ctx context.Context, accountID uuid.UUID, amount int64, currency string) (*BalanceResponse, error)
 }
 
 // accountService implements AccountService interface.
@@ -130,4 +131,52 @@ func (s *accountService) GetBalance(ctx context.Context, accountID uuid.UUID) (*
 	}
 
 	return result, nil
+}
+
+// Deposit validates the account and currency, then delegates the credit entry to ledger-service.
+func (s *accountService) Deposit(ctx context.Context, accountID uuid.UUID, amount int64, currency string) (*BalanceResponse, error) {
+	if amount <= 0 {
+		return nil, sharederrors.New(sharederrors.KindInvalidArgument,
+			fmt.Sprintf("amount must be positive, got %d", amount))
+	}
+
+	account, err := s.repo.GetByID(ctx, accountID)
+	if err != nil {
+		return nil, sharederrors.Wrap(sharederrors.KindInternal, "fetching account", err)
+	}
+	if account == nil {
+		return nil, sharederrors.New(sharederrors.KindNotFound, fmt.Sprintf("account %s not found", accountID))
+	}
+	if account.Status != domain.StatusActive {
+		return nil, sharederrors.New(sharederrors.KindFailedPrecondition,
+			fmt.Sprintf("account %s is not active (status: %s)", accountID, account.Status))
+	}
+
+	normalizedCurrency := strings.ToUpper(strings.TrimSpace(currency))
+	if account.Currency != normalizedCurrency {
+		return nil, sharederrors.New(sharederrors.KindInvalidArgument,
+			fmt.Sprintf("currency mismatch: account is %s, deposit is %s", account.Currency, normalizedCurrency))
+	}
+
+	depositCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+
+	resp, err := s.ledgerClient.Deposit(depositCtx, &ledgerv1.DepositRequest{
+		AccountId:   accountID.String(),
+		AmountMinor: amount,
+		Currency:    normalizedCurrency,
+	})
+	if err != nil {
+		return nil, sharederrors.Wrap(sharederrors.KindInternal, "depositing via ledger", err)
+	}
+
+	if s.redisClient != nil {
+		cacheKey := fmt.Sprintf("balance:%s", accountID.String())
+		s.redisClient.Del(ctx, cacheKey)
+	}
+
+	return &BalanceResponse{
+		BalanceMinor: resp.GetBalanceMinor(),
+		Currency:     resp.GetCurrency(),
+	}, nil
 }

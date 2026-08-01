@@ -14,6 +14,7 @@ import (
 type LedgerRepository interface {
 	PostEntries(ctx context.Context, txID uuid.UUID, entries []domain.LedgerEntry) error
 	GetBalance(ctx context.Context, accountID uuid.UUID) (int64, error)
+	Deposit(ctx context.Context, accountID uuid.UUID, amount int64, currency string) error
 }
 
 // ledgerRepository implements the ledger repository using Postgres.
@@ -92,6 +93,19 @@ func (r *ledgerRepository) GetBalance(ctx context.Context, accountID uuid.UUID) 
 	}
 
 	return balance, nil
+}
+
+// Deposit inserts a single credit ledger entry.
+func (r *ledgerRepository) Deposit(ctx context.Context, accountID uuid.UUID, amount int64, currency string) error {
+	query := `
+		INSERT INTO ledger_entries (id, transaction_id, account_id, direction, amount_minor, currency)
+		VALUES ($1, $2, $3, 'credit', $4, $5)
+	`
+	_, err := r.pool.Exec(ctx, query, uuid.New(), uuid.New(), accountID, amount, currency)
+	if err != nil {
+		return fmt.Errorf("inserting deposit entry: %w", err)
+	}
+	return nil
 }
 
 // collectAccountIDs extracts unique account IDs from a set of entries.

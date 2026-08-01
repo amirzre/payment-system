@@ -7,6 +7,7 @@ option go_package = "github.com/amirzre/payment-system/gen/go/ledger/v1;ledgerv1
 service LedgerService {
     rpc PostEntries(PostEntriesRequest) returns (PostEntriesResponse);
     rpc GetBalance(GetBalanceRequest) returns (GetBalanceResponse);
+    rpc Deposit(DepositRequest) returns (DepositResponse);
 }
 
 enum LedgerDirection {
@@ -36,6 +37,18 @@ message GetBalanceRequest {
 }
 
 message GetBalanceResponse {
+  string account_id = 1;
+  int64 balance_minor = 2;
+  string currency = 3;
+}
+
+message DepositRequest {
+  string account_id = 1;
+  int64 amount_minor = 2;
+  string currency = 3;
+}
+
+message DepositResponse {
   string account_id = 1;
   int64 balance_minor = 2;
   string currency = 3;

@@ -338,6 +338,126 @@ func (x *GetBalanceResponse) GetCurrency() string {
 	return ""
 }
 
+type DepositRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	AccountId     string                 `protobuf:"bytes,1,opt,name=account_id,json=accountId,proto3" json:"account_id,omitempty"`
+	AmountMinor   int64                  `protobuf:"varint,2,opt,name=amount_minor,json=amountMinor,proto3" json:"amount_minor,omitempty"`
+	Currency      string                 `protobuf:"bytes,3,opt,name=currency,proto3" json:"currency,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DepositRequest) Reset() {
+	*x = DepositRequest{}
+	mi := &file_ledger_v1_ledger_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DepositRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DepositRequest) ProtoMessage() {}
+
+func (x *DepositRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_ledger_v1_ledger_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DepositRequest.ProtoReflect.Descriptor instead.
+func (*DepositRequest) Descriptor() ([]byte, []int) {
+	return file_ledger_v1_ledger_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *DepositRequest) GetAccountId() string {
+	if x != nil {
+		return x.AccountId
+	}
+	return ""
+}
+
+func (x *DepositRequest) GetAmountMinor() int64 {
+	if x != nil {
+		return x.AmountMinor
+	}
+	return 0
+}
+
+func (x *DepositRequest) GetCurrency() string {
+	if x != nil {
+		return x.Currency
+	}
+	return ""
+}
+
+type DepositResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	AccountId     string                 `protobuf:"bytes,1,opt,name=account_id,json=accountId,proto3" json:"account_id,omitempty"`
+	BalanceMinor  int64                  `protobuf:"varint,2,opt,name=balance_minor,json=balanceMinor,proto3" json:"balance_minor,omitempty"`
+	Currency      string                 `protobuf:"bytes,3,opt,name=currency,proto3" json:"currency,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *DepositResponse) Reset() {
+	*x = DepositResponse{}
+	mi := &file_ledger_v1_ledger_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DepositResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DepositResponse) ProtoMessage() {}
+
+func (x *DepositResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_ledger_v1_ledger_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DepositResponse.ProtoReflect.Descriptor instead.
+func (*DepositResponse) Descriptor() ([]byte, []int) {
+	return file_ledger_v1_ledger_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *DepositResponse) GetAccountId() string {
+	if x != nil {
+		return x.AccountId
+	}
+	return ""
+}
+
+func (x *DepositResponse) GetBalanceMinor() int64 {
+	if x != nil {
+		return x.BalanceMinor
+	}
+	return 0
+}
+
+func (x *DepositResponse) GetCurrency() string {
+	if x != nil {
+		return x.Currency
+	}
+	return ""
+}
+
 var File_ledger_v1_ledger_proto protoreflect.FileDescriptor
 
 const file_ledger_v1_ledger_proto_rawDesc = "" +
@@ -361,15 +481,26 @@ const file_ledger_v1_ledger_proto_rawDesc = "" +
 	"\n" +
 	"account_id\x18\x01 \x01(\tR\taccountId\x12#\n" +
 	"\rbalance_minor\x18\x02 \x01(\x03R\fbalanceMinor\x12\x1a\n" +
+	"\bcurrency\x18\x03 \x01(\tR\bcurrency\"n\n" +
+	"\x0eDepositRequest\x12\x1d\n" +
+	"\n" +
+	"account_id\x18\x01 \x01(\tR\taccountId\x12!\n" +
+	"\famount_minor\x18\x02 \x01(\x03R\vamountMinor\x12\x1a\n" +
+	"\bcurrency\x18\x03 \x01(\tR\bcurrency\"q\n" +
+	"\x0fDepositResponse\x12\x1d\n" +
+	"\n" +
+	"account_id\x18\x01 \x01(\tR\taccountId\x12#\n" +
+	"\rbalance_minor\x18\x02 \x01(\x03R\fbalanceMinor\x12\x1a\n" +
 	"\bcurrency\x18\x03 \x01(\tR\bcurrency*l\n" +
 	"\x0fLedgerDirection\x12 \n" +
 	"\x1cLEDGER_DIRECTION_UNSPECIFIED\x10\x00\x12\x1a\n" +
 	"\x16LEDGER_DIRECTION_DEBIT\x10\x01\x12\x1b\n" +
-	"\x17LEDGER_DIRECTION_CREDIT\x10\x022\xa8\x01\n" +
+	"\x17LEDGER_DIRECTION_CREDIT\x10\x022\xea\x01\n" +
 	"\rLedgerService\x12L\n" +
 	"\vPostEntries\x12\x1d.ledger.v1.PostEntriesRequest\x1a\x1e.ledger.v1.PostEntriesResponse\x12I\n" +
 	"\n" +
-	"GetBalance\x12\x1c.ledger.v1.GetBalanceRequest\x1a\x1d.ledger.v1.GetBalanceResponseB\x9e\x01\n" +
+	"GetBalance\x12\x1c.ledger.v1.GetBalanceRequest\x1a\x1d.ledger.v1.GetBalanceResponse\x12@\n" +
+	"\aDeposit\x12\x19.ledger.v1.DepositRequest\x1a\x1a.ledger.v1.DepositResponseB\x9e\x01\n" +
 	"\rcom.ledger.v1B\vLedgerProtoP\x01Z;github.com/amirzre/payment-system/gen/go/ledger/v1;ledgerv1\xa2\x02\x03LXX\xaa\x02\tLedger.V1\xca\x02\tLedger\\V1\xe2\x02\x15Ledger\\V1\\GPBMetadata\xea\x02\n" +
 	"Ledger::V1b\x06proto3"
 
@@ -386,7 +517,7 @@ func file_ledger_v1_ledger_proto_rawDescGZIP() []byte {
 }
 
 var file_ledger_v1_ledger_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_ledger_v1_ledger_proto_msgTypes = make([]protoimpl.MessageInfo, 5)
+var file_ledger_v1_ledger_proto_msgTypes = make([]protoimpl.MessageInfo, 7)
 var file_ledger_v1_ledger_proto_goTypes = []any{
 	(LedgerDirection)(0),        // 0: ledger.v1.LedgerDirection
 	(*LedgerEntry)(nil),         // 1: ledger.v1.LedgerEntry
@@ -394,16 +525,20 @@ var file_ledger_v1_ledger_proto_goTypes = []any{
 	(*PostEntriesResponse)(nil), // 3: ledger.v1.PostEntriesResponse
 	(*GetBalanceRequest)(nil),   // 4: ledger.v1.GetBalanceRequest
 	(*GetBalanceResponse)(nil),  // 5: ledger.v1.GetBalanceResponse
+	(*DepositRequest)(nil),      // 6: ledger.v1.DepositRequest
+	(*DepositResponse)(nil),     // 7: ledger.v1.DepositResponse
 }
 var file_ledger_v1_ledger_proto_depIdxs = []int32{
 	0, // 0: ledger.v1.LedgerEntry.direction:type_name -> ledger.v1.LedgerDirection
 	1, // 1: ledger.v1.PostEntriesRequest.entries:type_name -> ledger.v1.LedgerEntry
 	2, // 2: ledger.v1.LedgerService.PostEntries:input_type -> ledger.v1.PostEntriesRequest
 	4, // 3: ledger.v1.LedgerService.GetBalance:input_type -> ledger.v1.GetBalanceRequest
-	3, // 4: ledger.v1.LedgerService.PostEntries:output_type -> ledger.v1.PostEntriesResponse
-	5, // 5: ledger.v1.LedgerService.GetBalance:output_type -> ledger.v1.GetBalanceResponse
-	4, // [4:6] is the sub-list for method output_type
-	2, // [2:4] is the sub-list for method input_type
+	6, // 4: ledger.v1.LedgerService.Deposit:input_type -> ledger.v1.DepositRequest
+	3, // 5: ledger.v1.LedgerService.PostEntries:output_type -> ledger.v1.PostEntriesResponse
+	5, // 6: ledger.v1.LedgerService.GetBalance:output_type -> ledger.v1.GetBalanceResponse
+	7, // 7: ledger.v1.LedgerService.Deposit:output_type -> ledger.v1.DepositResponse
+	5, // [5:8] is the sub-list for method output_type
+	2, // [2:5] is the sub-list for method input_type
 	2, // [2:2] is the sub-list for extension type_name
 	2, // [2:2] is the sub-list for extension extendee
 	0, // [0:2] is the sub-list for field type_name
@@ -420,7 +555,7 @@ func file_ledger_v1_ledger_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_ledger_v1_ledger_proto_rawDesc), len(file_ledger_v1_ledger_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   5,
+			NumMessages:   7,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
