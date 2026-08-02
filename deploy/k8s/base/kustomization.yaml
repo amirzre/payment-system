@@ -1,0 +1,16 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: payment-system
+
+resources:
+  - namespace.yaml
+  - secrets.yaml
+  - configmap.yaml
+  - postgres.yaml
+  - infra.yaml
+  - auth.yaml
+  - ledger.yaml
+  - account.yaml
+  - payment.yaml
+  - api-gateway.yaml
