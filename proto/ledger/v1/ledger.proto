@@ -1,0 +1,55 @@
+syntax = "proto3";
+
+package ledger.v1;
+
+option go_package = "github.com/amirzre/payment-system/gen/go/ledger/v1;ledgerv1";
+
+service LedgerService {
+    rpc PostEntries(PostEntriesRequest) returns (PostEntriesResponse);
+    rpc GetBalance(GetBalanceRequest) returns (GetBalanceResponse);
+    rpc Deposit(DepositRequest) returns (DepositResponse);
+}
+
+enum LedgerDirection {
+  LEDGER_DIRECTION_UNSPECIFIED = 0;
+  LEDGER_DIRECTION_DEBIT = 1;
+  LEDGER_DIRECTION_CREDIT = 2;
+}
+
+message LedgerEntry {
+    string account_id = 1;
+    LedgerDirection direction = 2;
+    int64 amount_minor = 3;
+    string currency = 4;
+}
+
+message PostEntriesRequest {
+  string transaction_id = 1;
+  repeated LedgerEntry entries = 2;
+}
+
+message PostEntriesResponse {
+  bool success = 1;
+}
+
+message GetBalanceRequest {
+  string account_id = 1;
+}
+
+message GetBalanceResponse {
+  string account_id = 1;
+  int64 balance_minor = 2;
+  string currency = 3;
+}
+
+message DepositRequest {
+  string account_id = 1;
+  int64 amount_minor = 2;
+  string currency = 3;
+}
+
+message DepositResponse {
+  string account_id = 1;
+  int64 balance_minor = 2;
+  string currency = 3;
+}

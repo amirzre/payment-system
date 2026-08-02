@@ -1,0 +1,32 @@
+name: API Gateway CI
+
+on:
+  pull_request:
+    paths:
+      - services/api-gateway/**
+      - shared/**
+      - proto/account/**
+      - proto/payment/**
+      - proto/auth/**
+      - gen/go/**
+      - .github/workflows/_service-ci.yml
+      - .github/workflows/api-gateway-ci.yml
+  push:
+    branches: [main]
+    paths:
+      - services/api-gateway/**
+      - shared/**
+      - proto/account/**
+      - proto/payment/**
+      - proto/auth/**
+      - gen/go/**
+      - .github/workflows/_service-ci.yml
+      - .github/workflows/api-gateway-ci.yml
+
+jobs:
+  call-reusable:
+    uses: ./.github/workflows/_service-ci.yml
+    with:
+      service: api-gateway
+      context: services/api-gateway
+      integration: false

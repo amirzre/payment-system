@@ -1,0 +1,32 @@
+name: Payment Service CI
+
+on:
+  pull_request:
+    paths:
+      - services/payment/**
+      - shared/**
+      - proto/payment/**
+      - proto/account/**
+      - proto/ledger/**
+      - gen/go/**
+      - .github/workflows/_service-ci.yml
+      - .github/workflows/payment-ci.yml
+  push:
+    branches: [main]
+    paths:
+      - services/payment/**
+      - shared/**
+      - proto/payment/**
+      - proto/account/**
+      - proto/ledger/**
+      - gen/go/**
+      - .github/workflows/_service-ci.yml
+      - .github/workflows/payment-ci.yml
+
+jobs:
+  call-reusable:
+    uses: ./.github/workflows/_service-ci.yml
+    with:
+      service: payment
+      context: services/payment
+      integration: true

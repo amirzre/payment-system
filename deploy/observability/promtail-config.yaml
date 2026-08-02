@@ -1,0 +1,44 @@
+server:
+  http_listen_port: 9080
+  grpc_listen_port: 0
+
+positions:
+  filename: /tmp/positions.yaml
+
+clients:
+  - url: http://loki:3100/loki/api/v1/push
+
+scrape_configs:
+  # Scrape all Docker containers via the Docker socket
+  - job_name: docker
+    docker_sd_configs:
+      - host: unix:///var/run/docker.sock
+        refresh_interval: 5s
+    relabel_configs:
+      # Use the container name as the label
+      - source_labels: [__meta_docker_container_name]
+        regex: "/(.*)"
+        target_label: container
+      # Drop promtail's own logs
+      - source_labels: [__meta_docker_container_name]
+        regex: "/promtail"
+        action: drop
+    pipeline_stages:
+      # Parse JSON log lines (our services use slog.JSONHandler)
+      - json:
+          expressions:
+            time: time
+            level: level
+            msg: msg
+            service: service
+            method: method
+            code: code
+            duration: duration
+            request_id: request_id
+            error: error
+      - timestamp:
+          source: time
+          format: RFC3339Nano
+      - labels:
+          level:
+          service:

@@ -1,0 +1,16 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: payment-services
+    metrics_path: /metrics
+    static_configs:
+      - targets:
+          - account-service:9090
+          - ledger-service:9090
+          - payment-service:9090
+          - auth-service:9090
+          - api-gateway:9090
+        labels:
+          namespace: payment-system

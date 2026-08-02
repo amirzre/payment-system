@@ -1,0 +1,443 @@
+services:
+  postgres-account:
+    image: postgres:18-alpine
+    container_name: postgres-account
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${PG_USER:-postgres}
+      POSTGRES_PASSWORD: ${PG_PASSWORD:-postgresql}
+      POSTGRES_DB: account
+    ports:
+      - "5432:5432"
+    volumes:
+      - pg_account_data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${PG_USER:-postgres} -d account"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - payment-net
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 512M
+
+  postgres-ledger:
+    image: postgres:18-alpine
+    container_name: postgres-ledger
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${PG_USER:-postgres}
+      POSTGRES_PASSWORD: ${PG_PASSWORD:-postgresql}
+      POSTGRES_DB: ledger
+    ports:
+      - "5433:5432"
+    volumes:
+      - pg_ledger_data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${PG_USER:-postgres} -d ledger"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - payment-net
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 512M
+
+  postgres-payment:
+    image: postgres:18-alpine
+    container_name: postgres-payment
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${PG_USER:-postgres}
+      POSTGRES_PASSWORD: ${PG_PASSWORD:-postgresql}
+      POSTGRES_DB: payment
+    ports:
+      - "5434:5432"
+    volumes:
+      - pg_payment_data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${PG_USER:-postgres} -d payment"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - payment-net
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 512M
+
+  postgres-auth:
+    image: postgres:18-alpine
+    container_name: postgres-auth
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${PG_USER:-postgres}
+      POSTGRES_PASSWORD: ${PG_PASSWORD:-postgresql}
+      POSTGRES_DB: auth
+    ports:
+      - "5435:5432"
+    volumes:
+      - pg_auth_data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${PG_USER:-postgres} -d auth"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - payment-net
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 512M
+
+  redis:
+    image: redis:8-alpine
+    container_name: redis
+    restart: unless-stopped
+    command: redis-server --save 60 1 --loglevel warning --maxmemory 256mb --maxmemory-policy allkeys-lru
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    networks:
+      - payment-net
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 512M
+
+  nats:
+    image: nats:2.14-alpine
+    container_name: nats
+    restart: unless-stopped
+    command: "-js -m 8222"
+    ports:
+      - "4222:4222"
+      - "8222:8222"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8222/healthz || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    networks:
+      - payment-net
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+
+  account-migrate:
+    image: migrate/migrate:v4.18.2
+    restart: "no"
+    volumes:
+      - ./services/account/migrations:/migrations:ro
+    command:
+      - -path=/migrations
+      - -database=postgres://${PG_USER:-postgres}:${PG_PASSWORD:-postgresql}@postgres-account:5432/account?sslmode=disable
+      - up
+    depends_on:
+      postgres-account:
+        condition: service_healthy
+    networks:
+      - payment-net
+
+  ledger-migrate:
+    image: migrate/migrate:v4.18.2
+    restart: "no"
+    volumes:
+      - ./services/ledger/migrations:/migrations:ro
+    command:
+      - -path=/migrations
+      - -database=postgres://${PG_USER:-postgres}:${PG_PASSWORD:-postgresql}@postgres-ledger:5432/ledger?sslmode=disable
+      - up
+    depends_on:
+      postgres-ledger:
+        condition: service_healthy
+    networks:
+      - payment-net
+
+  payment-migrate:
+    image: migrate/migrate:v4.18.2
+    restart: "no"
+    volumes:
+      - ./services/payment/migrations:/migrations:ro
+    command:
+      - -path=/migrations
+      - -database=postgres://${PG_USER:-postgres}:${PG_PASSWORD:-postgresql}@postgres-payment:5432/payment?sslmode=disable
+      - up
+    depends_on:
+      postgres-payment:
+        condition: service_healthy
+    networks:
+      - payment-net
+
+  auth-migrate:
+    image: migrate/migrate:v4.18.2
+    restart: "no"
+    volumes:
+      - ./services/auth/migrations:/migrations:ro
+    command:
+      - -path=/migrations
+      - -database=postgres://${PG_USER:-postgres}:${PG_PASSWORD:-postgresql}@postgres-auth:5432/auth?sslmode=disable
+      - up
+    depends_on:
+      postgres-auth:
+        condition: service_healthy
+    networks:
+      - payment-net
+
+  auth:
+    build:
+      context: .
+      dockerfile: services/auth/Dockerfile
+    container_name: auth-service
+    restart: unless-stopped
+    environment:
+      SERVER_ENVIRONMENT: production
+      SERVER_PORT: "50054"
+      DATABASE_URL: postgres://${PG_USER:-postgres}:${PG_PASSWORD:-postgresql}@postgres-auth:5432/auth?sslmode=disable
+      PRIVATE_KEY_PEM: ${PRIVATE_KEY_PEM}
+      PUBLIC_KEY_PEM: ${PUBLIC_KEY_PEM}
+    ports:
+      - "50054:50054"
+    depends_on:
+      postgres-auth:
+        condition: service_healthy
+      auth-migrate:
+        condition: service_completed_successfully
+    networks:
+      - payment-net
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+
+  ledger:
+    build:
+      context: .
+      dockerfile: services/ledger/Dockerfile
+    container_name: ledger-service
+    restart: unless-stopped
+    environment:
+      SERVER_ENVIRONMENT: production
+      SERVER_PORT: "50052"
+      DATABASE_URL: postgres://${PG_USER:-postgres}:${PG_PASSWORD:-postgresql}@postgres-ledger:5432/ledger?sslmode=disable
+      NATS_ADDR: nats://nats:4222
+    ports:
+      - "50052:50052"
+    depends_on:
+      postgres-ledger:
+        condition: service_healthy
+      ledger-migrate:
+        condition: service_completed_successfully
+      nats:
+        condition: service_healthy
+    networks:
+      - payment-net
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+
+  account:
+    build:
+      context: .
+      dockerfile: services/account/Dockerfile
+    container_name: account-service
+    restart: unless-stopped
+    environment:
+      SERVER_ENVIRONMENT: production
+      SERVER_PORT: "50051"
+      DATABASE_URL: postgres://${PG_USER:-postgres}:${PG_PASSWORD:-postgresql}@postgres-account:5432/account?sslmode=disable
+      REDIS_URL: redis:6379
+      NATS_URL: nats://nats:4222
+      LEDGER_GRPC_ADDR: ledger:50052
+    ports:
+      - "50051:50051"
+    depends_on:
+      postgres-account:
+        condition: service_healthy
+      account-migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      nats:
+        condition: service_healthy
+      ledger:
+        condition: service_started
+    networks:
+      - payment-net
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+
+  payment:
+    build:
+      context: .
+      dockerfile: services/payment/Dockerfile
+    container_name: payment-service
+    restart: unless-stopped
+    environment:
+      SERVER_ENVIRONMENT: production
+      SERVER_PORT: "50053"
+      DATABASE_URL: postgres://${PG_USER:-postgres}:${PG_PASSWORD:-postgresql}@postgres-payment:5432/payment?sslmode=disable
+      REDIS_URL: redis:6379
+      NATS_URL: nats://nats:4222
+      ACCOUNT_GRPC_ADDR: account:50051
+      LEDGER_GRPC_ADDR: ledger:50052
+    ports:
+      - "50053:50053"
+    depends_on:
+      postgres-payment:
+        condition: service_healthy
+      payment-migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      nats:
+        condition: service_healthy
+      account:
+        condition: service_started
+      ledger:
+        condition: service_started
+    networks:
+      - payment-net
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+
+  api-gateway:
+    build:
+      context: .
+      dockerfile: services/api-gateway/Dockerfile
+    container_name: api-gateway
+    restart: unless-stopped
+    environment:
+      SERVER_ENVIRONMENT: production
+      SERVER_PORT: "8080"
+      ACCOUNT_GRPC_ADDR: account:50051
+      PAYMENT_GRPC_ADDR: payment:50053
+      AUTH_GRPC_ADDR: auth:50054
+    ports:
+      - "8080:8080"
+    depends_on:
+      account:
+        condition: service_started
+      payment:
+        condition: service_started
+      auth:
+        condition: service_started
+    networks:
+      - payment-net
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: pgadmin
+    restart: unless-stopped
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@email.com
+      PGADMIN_DEFAULT_PASSWORD: admin
+    ports:
+      - "5050:80"
+    depends_on:
+      - postgres-account
+      - postgres-ledger
+      - postgres-payment
+      - postgres-auth
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+    networks:
+      - payment-net
+
+  loki:
+    image: grafana/loki:3.3.2
+    container_name: loki
+    restart: unless-stopped
+    command: -config.file=/etc/loki/loki-config.yaml
+    ports:
+      - "3100:3100"
+    volumes:
+      - ./deploy/observability/loki-config.yaml:/etc/loki/loki-config.yaml:ro
+      - loki_data:/loki
+    networks:
+      - payment-net
+
+  promtail:
+    image: grafana/promtail:3.3.2
+    container_name: promtail
+    restart: unless-stopped
+    command: -config.file=/etc/promtail/promtail-config.yaml
+    volumes:
+      - ./deploy/observability/promtail-config.yaml:/etc/promtail/promtail-config.yaml:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    depends_on:
+      - loki
+    networks:
+      - payment-net
+
+  grafana:
+    image: grafana/grafana:11.6.0
+    container_name: grafana
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_INSTALL_PLUGINS: ""
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./deploy/observability/grafana-datasources.yml:/etc/grafana/provisioning/datasources/datasources.yml:ro
+      - grafana_data:/var/lib/grafana
+    depends_on:
+      - loki
+    networks:
+      - payment-net
+
+
+networks:
+  payment-net:
+    driver: bridge
+    name: payment-net
+
+volumes:
+  pg_account_data:
+  pg_ledger_data:
+  pg_payment_data:
+  pg_auth_data:
+  redis_data:
+  pgadmin_data:
+  loki_data:
+  grafana_data:
