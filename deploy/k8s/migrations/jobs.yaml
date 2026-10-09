@@ -1,0 +1,244 @@
+# Created with kubectl create: each migration run gets a new Job name.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  generateName: account-migrate-
+  namespace: payment-system
+  labels:
+    app.kubernetes.io/component: migration
+    app.kubernetes.io/name: account
+spec:
+  backoffLimit: 3
+  activeDeadlineSeconds: 300
+  ttlSecondsAfterFinished: 86400
+  template:
+    spec:
+      restartPolicy: Never
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      initContainers:
+      - name: wait-for-db
+        image: postgres:17-alpine
+        imagePullPolicy: IfNotPresent
+        securityContext: &id001
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
+        command:
+        - sh
+        - -ec
+        - until pg_isready -q -d "$DATABASE_URL"; do sleep 2; done
+        env: &id002
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: account-postgres-credentials
+              key: DATABASE_URL
+      containers:
+      - name: migrate
+        image: migrate/migrate:v4.18.2
+        imagePullPolicy: IfNotPresent
+        securityContext: *id001
+        args:
+        - -path=/migrations
+        - -database=$(DATABASE_URL)
+        - up
+        env: *id002
+        volumeMounts:
+        - name: migrations
+          mountPath: /migrations
+          readOnly: true
+      volumes:
+      - name: migrations
+        configMap:
+          name: account-migrations
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  generateName: auth-migrate-
+  namespace: payment-system
+  labels:
+    app.kubernetes.io/component: migration
+    app.kubernetes.io/name: auth
+spec:
+  backoffLimit: 3
+  activeDeadlineSeconds: 300
+  ttlSecondsAfterFinished: 86400
+  template:
+    spec:
+      restartPolicy: Never
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      initContainers:
+      - name: wait-for-db
+        image: postgres:17-alpine
+        imagePullPolicy: IfNotPresent
+        securityContext: &id001
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
+        command:
+        - sh
+        - -ec
+        - until pg_isready -q -d "$DATABASE_URL"; do sleep 2; done
+        env: &id002
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: auth-postgres-credentials
+              key: DATABASE_URL
+      containers:
+      - name: migrate
+        image: migrate/migrate:v4.18.2
+        imagePullPolicy: IfNotPresent
+        securityContext: *id001
+        args:
+        - -path=/migrations
+        - -database=$(DATABASE_URL)
+        - up
+        env: *id002
+        volumeMounts:
+        - name: migrations
+          mountPath: /migrations
+          readOnly: true
+      volumes:
+      - name: migrations
+        configMap:
+          name: auth-migrations
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  generateName: ledger-migrate-
+  namespace: payment-system
+  labels:
+    app.kubernetes.io/component: migration
+    app.kubernetes.io/name: ledger
+spec:
+  backoffLimit: 3
+  activeDeadlineSeconds: 300
+  ttlSecondsAfterFinished: 86400
+  template:
+    spec:
+      restartPolicy: Never
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      initContainers:
+      - name: wait-for-db
+        image: postgres:17-alpine
+        imagePullPolicy: IfNotPresent
+        securityContext: &id001
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
+        command:
+        - sh
+        - -ec
+        - until pg_isready -q -d "$DATABASE_URL"; do sleep 2; done
+        env: &id002
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: ledger-postgres-credentials
+              key: DATABASE_URL
+      containers:
+      - name: migrate
+        image: migrate/migrate:v4.18.2
+        imagePullPolicy: IfNotPresent
+        securityContext: *id001
+        args:
+        - -path=/migrations
+        - -database=$(DATABASE_URL)
+        - up
+        env: *id002
+        volumeMounts:
+        - name: migrations
+          mountPath: /migrations
+          readOnly: true
+      volumes:
+      - name: migrations
+        configMap:
+          name: ledger-migrations
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  generateName: payment-migrate-
+  namespace: payment-system
+  labels:
+    app.kubernetes.io/component: migration
+    app.kubernetes.io/name: payment
+spec:
+  backoffLimit: 3
+  activeDeadlineSeconds: 300
+  ttlSecondsAfterFinished: 86400
+  template:
+    spec:
+      restartPolicy: Never
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      initContainers:
+      - name: wait-for-db
+        image: postgres:17-alpine
+        imagePullPolicy: IfNotPresent
+        securityContext: &id001
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
+        command:
+        - sh
+        - -ec
+        - until pg_isready -q -d "$DATABASE_URL"; do sleep 2; done
+        env: &id002
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: payment-postgres-credentials
+              key: DATABASE_URL
+      containers:
+      - name: migrate
+        image: migrate/migrate:v4.18.2
+        imagePullPolicy: IfNotPresent
+        securityContext: *id001
+        args:
+        - -path=/migrations
+        - -database=$(DATABASE_URL)
+        - up
+        env: *id002
+        volumeMounts:
+        - name: migrations
+          mountPath: /migrations
+          readOnly: true
+      volumes:
+      - name: migrations
+        configMap:
+          name: payment-migrations
