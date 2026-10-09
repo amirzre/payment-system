@@ -14,7 +14,6 @@ import (
 	"github.com/amirzre/payment-system/services/ledger/internal/app"
 	"github.com/amirzre/payment-system/services/ledger/internal/config"
 	"github.com/amirzre/payment-system/services/ledger/internal/repository"
-	ledgerconsumer "github.com/amirzre/payment-system/services/ledger/internal/transport/consumer"
 	ledgertransport "github.com/amirzre/payment-system/services/ledger/internal/transport/grpc"
 	"github.com/amirzre/payment-system/shared/eventbus"
 	"github.com/amirzre/payment-system/shared/healthcheck"
@@ -34,7 +33,8 @@ func main() {
 	log.Info("starting ledger-service", slog.Int("port", cfg.Server.GRPCPort))
 
 	// Connect to Database
-	ctx := context.Background()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	pool, err := pgxpool.New(ctx, cfg.Database.DatabaseURL)
 	if err != nil {
 		log.Error("failed to create pgx pool", slog.Any("error", err))
@@ -54,7 +54,8 @@ func main() {
 		var err error
 		eb, err = eventbus.NewNatsEventBus(cfg.Nats.NatsURL, log)
 		if err != nil {
-			log.Warn("NATS unavailable", slog.Any("error", err))
+			log.Error("NATS setup failed", slog.Any("error", err))
+			os.Exit(1)
 		} else {
 			defer eb.Close()
 		}
@@ -67,11 +68,8 @@ func main() {
 
 	// Outbox + consumers
 	if eb != nil {
-		go eventbus.RunOutboxPublisher(context.Background(), pool, eb, log, 1*time.Second)
+		go eventbus.RunOutboxPublisher(ctx, pool, eb, log, 1*time.Second)
 
-		fundsHandler := eventbus.WithIdempotency(pool, "ledger-funds-reserved",
-			ledgerconsumer.FundsReservedHandler(ledgerSrv, eb, log))
-		eb.Subscribe(context.Background(), "funds.reserved", "ledger-service", fundsHandler)
 	}
 
 	// Set up gRPC server
@@ -94,6 +92,7 @@ func main() {
 		signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 		sig := <-sigCh
 		log.Info("received signal, shutting down", slog.String("signal", sig.String()))
+		cancel()
 		healthServer.Shutdown()
 		grpcServer.GracefulStop()
 	}()

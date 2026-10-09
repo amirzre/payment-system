@@ -31,6 +31,7 @@ func main() {
 	// gRPC connections
 	accountConn, _ := grpc.NewClient(cfg.Service.AccountGRPCAddr,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithDefaultCallOptions(grpc.WaitForReady(true)),
 		grpc.WithChainUnaryInterceptor(
 			middleware.UnaryClientCircuitBreaker(middleware.DefaultCircuitBreakerConfig()),
 			middleware.UnaryClientRetry(middleware.DefaultRetryConfig()),
@@ -41,6 +42,7 @@ func main() {
 
 	paymentConn, _ := grpc.NewClient(cfg.Service.PaymentGRPCAddr,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithDefaultCallOptions(grpc.WaitForReady(true)),
 		grpc.WithChainUnaryInterceptor(
 			middleware.UnaryClientCircuitBreaker(middleware.DefaultCircuitBreakerConfig()),
 			middleware.UnaryClientRetry(middleware.DefaultRetryConfig()),
@@ -51,6 +53,7 @@ func main() {
 
 	authConn, _ := grpc.NewClient(cfg.Service.AuthGRPCAddr,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithDefaultCallOptions(grpc.WaitForReady(true)),
 		grpc.WithChainUnaryInterceptor(
 			middleware.UnaryClientCircuitBreaker(middleware.DefaultCircuitBreakerConfig()),
 			middleware.UnaryClientRetry(middleware.DefaultRetryConfig()),

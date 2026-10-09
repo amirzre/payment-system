@@ -15,6 +15,11 @@ func TestToGRPCStatus(t *testing.T) {
 		wantCode codes.Code
 	}{
 		{
+			name:     "downstream unavailable stays retryable",
+			err:      status.Error(codes.Unavailable, "ledger unavailable"),
+			wantCode: codes.Unavailable,
+		},
+		{
 			name:     "NotFound",
 			err:      New(KindNotFound, "resource not found"),
 			wantCode: codes.NotFound,

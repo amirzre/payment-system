@@ -2,9 +2,12 @@ package eventbus
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/nats-io/nats.go"
 )
@@ -18,7 +21,10 @@ type NatsEventBus struct {
 
 // NewNatsEventBus creates a new NATS JetStream event bus.
 func NewNatsEventBus(url string, log *slog.Logger) (*NatsEventBus, error) {
-	conn, err := nats.Connect(url)
+	if log == nil {
+		log = slog.Default()
+	}
+	conn, err := connectNats(url, log)
 	if err != nil {
 		return nil, fmt.Errorf("connecting to NATS: %w", err)
 	}
@@ -29,32 +35,77 @@ func NewNatsEventBus(url string, log *slog.Logger) (*NatsEventBus, error) {
 		return nil, fmt.Errorf("getting jetstream context: %w", err)
 	}
 
-	// Create streams for each event subject
+	// Provision the events emitted by the synchronous payment flow. Existing
+	// streams for dormant saga subjects are intentionally left untouched.
 	streams := []string{
-		"payment.requested",
-		"funds.reserved",
-		"funds.reservation.failed",
 		"ledger.posted",
 		"payment.completed",
 	}
 	for _, subject := range streams {
-		streamName := streamNameForSubject(subject)
-		_, err := js.AddStream(&nats.StreamConfig{
-			Name:     streamName,
-			Subjects: []string{subject},
-			Storage:  nats.FileStorage,
-		})
-		if err != nil {
-			// Stream may already exist — not an error
-			log.Info("stream info", slog.String("stream", streamName), slog.Any("error", err))
+		if err := ensureStream(js, subject); err != nil {
+			conn.Close()
+			return nil, fmt.Errorf("setting up stream for %s: %w", subject, err)
 		}
 	}
 
 	return &NatsEventBus{conn: conn, js: js, log: log}, nil
 }
 
+func connectNats(url string, log *slog.Logger) (*nats.Conn, error) {
+	// Outbox delivery and durable consumers must survive broker outages longer
+	// than the client's default reconnect limit without requiring a restart.
+	return nats.Connect(url,
+		nats.MaxReconnects(-1),
+		nats.DisconnectErrHandler(func(_ *nats.Conn, err error) {
+			log.Warn("NATS disconnected", slog.Any("error", err))
+		}),
+		nats.ReconnectHandler(func(_ *nats.Conn) {
+			log.Info("NATS reconnected")
+		}),
+	)
+}
+
+// ensureStream preserves an existing stream's retention, limits, and data.
+// It only adds the required subject; unrelated setup failures are fatal.
+func ensureStream(js nats.JetStreamContext, subject string) error {
+	name := streamNameForSubject(subject)
+	info, err := js.StreamInfo(name)
+	if errors.Is(err, nats.ErrStreamNotFound) {
+		_, err = js.AddStream(&nats.StreamConfig{Name: name, Subjects: []string{subject}, Storage: nats.FileStorage})
+		if err == nil {
+			return nil
+		}
+		// Another replica may have created the stream between lookup and add.
+		if !errors.Is(err, nats.ErrStreamNameAlreadyInUse) {
+			return err
+		}
+		info, err = js.StreamInfo(name)
+	}
+	if err != nil {
+		return err
+	}
+	if info.Config.Storage != nats.FileStorage {
+		return fmt.Errorf("stream %s must use file storage", name)
+	}
+	for _, existing := range info.Config.Subjects {
+		if existing == subject {
+			return nil
+		}
+	}
+	config := info.Config
+	config.Subjects = append(config.Subjects, subject)
+	_, err = js.UpdateStream(&config)
+	return err
+}
+
 // Publish publishes an event to the given subject.
+// A nonempty key must identify one event on that subject. JetStream suppresses
+// duplicate publications within the stream's duplicate window; consumers still
+// need durable idempotency for deliveries outside that window.
 func (n *NatsEventBus) Publish(ctx context.Context, subject string, key string, event any) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	data, err := json.Marshal(event)
 	if err != nil {
 		return fmt.Errorf("marshaling event: %w", err)
@@ -67,8 +118,13 @@ func (n *NatsEventBus) Publish(ctx context.Context, subject string, key string, 
 			"X-Message-Key": []string{key},
 		},
 	}
+	if key != "" {
+		// Include the subject to avoid collisions if stream subjects are merged.
+		id := sha256.Sum256([]byte(subject + "\x00" + key))
+		msg.Header.Set(nats.MsgIdHdr, fmt.Sprintf("%x", id))
+	}
 
-	_, err = n.js.PublishMsg(msg)
+	_, err = n.js.PublishMsg(msg, nats.Context(ctx))
 	if err != nil {
 		return fmt.Errorf("publishing to %s: %w", subject, err)
 	}
@@ -81,23 +137,52 @@ func (n *NatsEventBus) Publish(ctx context.Context, subject string, key string, 
 func (n *NatsEventBus) Subscribe(ctx context.Context, subject, consumerName string, h Handler) error {
 	streamName := streamNameForSubject(subject)
 
-	// Create a durable consumer for the consumer group
-	_, err := n.js.AddConsumer(streamName, &nats.ConsumerConfig{
-		Durable:       consumerName,
-		DeliverPolicy: nats.DeliverAllPolicy,
-		AckPolicy:     nats.AckExplicitPolicy,
-	})
+	// Inspect first so restarts preserve the durable's cursor and configuration.
+	info, err := n.js.ConsumerInfo(streamName, consumerName, nats.Context(ctx))
+	if errors.Is(err, nats.ErrConsumerNotFound) {
+		info, err = n.js.AddConsumer(streamName, &nats.ConsumerConfig{
+			Durable: consumerName, FilterSubject: subject,
+			DeliverPolicy: nats.DeliverAllPolicy, AckPolicy: nats.AckExplicitPolicy,
+		}, nats.Context(ctx))
+		if err != nil {
+			// A concurrent replica may have won creation; bind only after the
+			// resulting consumer has been inspected successfully.
+			if existing, lookupErr := n.js.ConsumerInfo(streamName, consumerName, nats.Context(ctx)); lookupErr == nil {
+				info, err = existing, nil
+			}
+		}
+	}
 	if err != nil {
-		return fmt.Errorf("adding consumer %s to stream %s: %w", consumerName, streamName, err)
+		return fmt.Errorf("setting up consumer %s on stream %s: %w", consumerName, streamName, err)
+	}
+	if info.Config.DeliverSubject != "" || info.Config.AckPolicy != nats.AckExplicitPolicy ||
+		(info.Config.FilterSubject != "" && info.Config.FilterSubject != subject) || len(info.Config.FilterSubjects) > 0 {
+		return fmt.Errorf("consumer %s on stream %s has incompatible configuration", consumerName, streamName)
+	}
+	if info.Config.FilterSubject == "" {
+		// Legacy consumers omitted the filter on single-subject streams. They
+		// remain safe only while the stream contains exactly that subject.
+		stream, err := n.js.StreamInfo(streamName, nats.Context(ctx))
+		if err != nil {
+			return fmt.Errorf("checking unfiltered consumer stream %s: %w", streamName, err)
+		}
+		if len(stream.Config.Subjects) != 1 || stream.Config.Subjects[0] != subject {
+			return fmt.Errorf("consumer %s on stream %s requires a subject filter", consumerName, streamName)
+		}
 	}
 
-	sub, err := n.js.PullSubscribe(subject, consumerName)
+	// Explicit binding prevents Unsubscribe from deleting the durable consumer.
+	sub, err := n.js.PullSubscribe(subject, consumerName, nats.Bind(streamName, consumerName), nats.Context(ctx))
 	if err != nil {
 		return fmt.Errorf("subscribing to %s: %w", subject, err)
 	}
 
 	go func() {
-		defer sub.Unsubscribe()
+		defer func() {
+			if err := sub.Unsubscribe(); err != nil && !errors.Is(err, nats.ErrBadSubscription) {
+				n.log.Error("unsubscribing", slog.String("subject", subject), slog.Any("error", err))
+			}
+		}()
 		for {
 			select {
 			case <-ctx.Done():
@@ -105,16 +190,29 @@ func (n *NatsEventBus) Subscribe(ctx context.Context, subject, consumerName stri
 			default:
 			}
 
-			msgs, err := sub.Fetch(10, nats.MaxWait(5_000_000_000)) // 5 second wait
+			fetchCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+			msgs, err := sub.Fetch(10, nats.Context(fetchCtx))
+			cancel()
 			if err != nil {
-				if err == nats.ErrTimeout || err == context.Canceled {
+				if ctx.Err() != nil || n.conn.IsClosed() {
+					return
+				}
+				if errors.Is(err, nats.ErrTimeout) || errors.Is(err, context.DeadlineExceeded) {
 					continue
 				}
 				n.log.Error("fetching messages", slog.String("subject", subject), slog.Any("error", err))
+				select {
+				case <-ctx.Done():
+					return
+				case <-time.After(time.Second):
+				}
 				continue
 			}
 
 			for _, msg := range msgs {
+				if ctx.Err() != nil {
+					return
+				}
 				key := ""
 				if msg.Header != nil {
 					key = msg.Header.Get("X-Message-Key")
@@ -126,12 +224,18 @@ func (n *NatsEventBus) Subscribe(ctx context.Context, subject, consumerName stri
 						slog.String("key", key),
 						slog.Any("error", err),
 					)
-					// Nak the message so it can be redelivered
-					msg.Nak()
+					if err := msg.NakWithDelay(time.Second); err != nil {
+						n.log.Error("delaying event retry", slog.String("subject", subject), slog.Any("error", err))
+					}
 					continue
 				}
 
-				msg.Ack()
+				ackCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+				err := msg.AckSync(nats.Context(ackCtx))
+				cancel()
+				if err != nil {
+					n.log.Error("acknowledging event", slog.String("subject", subject), slog.String("key", key), slog.Any("error", err))
+				}
 			}
 		}
 	}()

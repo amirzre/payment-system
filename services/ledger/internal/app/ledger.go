@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/amirzre/payment-system/services/ledger/internal/domain"
@@ -58,6 +59,12 @@ func (s *ledgerService) PostEntries(ctx context.Context, input PostEntriesInput)
 
 	entries := []domain.LedgerEntry{debit, credit}
 	if err := s.repo.PostEntries(ctx, input.TransactionID, entries); err != nil {
+		if errors.Is(err, domain.ErrInsufficientFunds) || errors.Is(err, domain.ErrCurrencyMismatch) {
+			return sharederrors.Wrap(sharederrors.KindFailedPrecondition, err.Error(), err)
+		}
+		if errors.Is(err, domain.ErrTransactionConflict) {
+			return sharederrors.Wrap(sharederrors.KindAlreadyExists, err.Error(), err)
+		}
 		return sharederrors.Wrap(sharederrors.KindInternal, "failed to post entries", err)
 	}
 

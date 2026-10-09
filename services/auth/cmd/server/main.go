@@ -28,8 +28,8 @@ func main() {
 	cfg := config.Load()
 
 	// Initialize logger
-	log := logger.New(cfg.Server.Environment, "payment-service")
-	log.Info("starting payment-service", slog.Int("port", cfg.Server.GRPCPort))
+	log := logger.New(cfg.Server.Environment, "auth-service")
+	log.Info("starting auth-service", slog.Int("port", cfg.Server.GRPCPort))
 
 	// Connect to Database
 	ctx := context.Background()

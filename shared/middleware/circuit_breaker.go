@@ -46,6 +46,9 @@ type circuitBreaker struct {
 	successCount    int
 	lastFailureTime time.Time
 	cfg             CircuitBreakerConfig
+	generation      uint64
+	probeInFlight   bool
+	now             func() time.Time
 }
 
 func newCircuitBreaker(cfg CircuitBreakerConfig) *circuitBreaker {
@@ -58,72 +61,92 @@ func newCircuitBreaker(cfg CircuitBreakerConfig) *circuitBreaker {
 	if cfg.OpenTimeout <= 0 {
 		cfg.OpenTimeout = 30 * time.Second
 	}
-	return &circuitBreaker{state: CircuitClosed, cfg: cfg}
+	return &circuitBreaker{state: CircuitClosed, cfg: cfg, now: time.Now}
 }
 
-func (cb *circuitBreaker) allow() bool {
+// admit returns a generation ticket, so calls admitted before a state transition
+// cannot change the failure or recovery counters of a newer circuit generation.
+func (cb *circuitBreaker) admit() (generation uint64, probe, allowed bool) {
 	cb.mu.Lock()
 	defer cb.mu.Unlock()
 
 	switch cb.state {
 	case CircuitClosed:
-		return true
+		return cb.generation, false, true
 	case CircuitOpen:
-		if time.Since(cb.lastFailureTime) > cb.cfg.OpenTimeout {
-			cb.state = CircuitHalfOpen
-			cb.successCount = 0
-			return true
+		if cb.now().Sub(cb.lastFailureTime) < cb.cfg.OpenTimeout {
+			return 0, false, false
 		}
-		return false
-	case CircuitHalfOpen:
-		return true
+		cb.state = CircuitHalfOpen
+		cb.generation++
+		cb.successCount = 0
 	}
-	return false
+	if cb.state == CircuitHalfOpen && !cb.probeInFlight {
+		cb.probeInFlight = true
+		return cb.generation, true, true
+	}
+	return 0, false, false
 }
 
-func (cb *circuitBreaker) recordSuccess() {
+// record treats caller cancellation as neutral: it releases a recovery permit
+// without adding a dependency failure or claiming a successful recovery.
+func (cb *circuitBreaker) record(generation uint64, probe, failed, canceled bool) {
 	cb.mu.Lock()
 	defer cb.mu.Unlock()
 
+	if generation != cb.generation {
+		return
+	}
+	if probe {
+		cb.probeInFlight = false
+	}
+	if canceled {
+		return
+	}
+	if failed {
+		cb.failureCount++
+		if cb.state == CircuitHalfOpen || cb.failureCount >= cb.cfg.FailureThreshold {
+			cb.state = CircuitOpen
+			cb.generation++
+			cb.successCount = 0
+			cb.lastFailureTime = cb.now()
+		}
+		return
+	}
 	cb.failureCount = 0
 	if cb.state == CircuitHalfOpen {
 		cb.successCount++
 		if cb.successCount >= cb.cfg.SuccessThreshold {
 			cb.state = CircuitClosed
+			cb.generation++
+			cb.successCount = 0
 		}
-	}
-}
-
-func (cb *circuitBreaker) recordFailure() {
-	cb.mu.Lock()
-	defer cb.mu.Unlock()
-
-	cb.failureCount++
-	cb.lastFailureTime = time.Now()
-
-	if cb.state == CircuitHalfOpen || cb.failureCount >= cb.cfg.FailureThreshold {
-		cb.state = CircuitOpen
 	}
 }
 
 // UnaryClientCircuitBreaker returns a client-side gRPC interceptor that implements
 // the circuit breaker pattern. It tracks failures per service (per interceptor instance)
 // and fast-fails when the circuit is open, returning codes.Unavailable.
+// Chain this interceptor before UnaryClientRetry to count each logical call once.
 func UnaryClientCircuitBreaker(cfg CircuitBreakerConfig) grpc.UnaryClientInterceptor {
-	cb := newCircuitBreaker(cfg)
+	return unaryClientCircuitBreaker(newCircuitBreaker(cfg))
+}
 
+func unaryClientCircuitBreaker(cb *circuitBreaker) grpc.UnaryClientInterceptor {
 	return func(ctx context.Context, method string, req, reply any, cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
-		if !cb.allow() {
+		if ctx.Err() != nil {
+			return status.FromContextError(ctx.Err()).Err()
+		}
+		generation, probe, allowed := cb.admit()
+		if !allowed {
 			return status.Error(codes.Unavailable, "circuit breaker open")
 		}
 
 		err := invoker(ctx, method, req, reply, cc, opts...)
-		if err != nil {
-			if isServerError(err) {
-				cb.recordFailure()
-			}
-		} else {
-			cb.recordSuccess()
+		canceled := ctx.Err() != nil
+		cb.record(generation, probe, err != nil && isServerError(err), canceled)
+		if canceled {
+			return status.FromContextError(ctx.Err()).Err()
 		}
 		return err
 	}

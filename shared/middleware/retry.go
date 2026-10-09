@@ -2,7 +2,6 @@ package middleware
 
 import (
 	"context"
-	"math"
 	"math/rand"
 	"time"
 
@@ -21,6 +20,10 @@ type RetryConfig struct {
 	MaxDelay time.Duration
 	// RetryableCodes are the gRPC status codes that trigger a retry.
 	RetryableCodes []codes.Code
+	// RetryableMethods explicitly lists RPCs safe to repeat. Nil selects the
+	// default allowlist; an empty non-nil slice disables retries for all methods.
+	// Only include writes whose server enforces a stable idempotency key.
+	RetryableMethods []string
 }
 
 // DefaultRetryConfig returns sensible defaults.
@@ -31,10 +34,16 @@ func DefaultRetryConfig() RetryConfig {
 		MaxDelay:   5 * time.Second,
 		RetryableCodes: []codes.Code{
 			codes.Unavailable,
-			codes.DeadlineExceeded,
 			codes.ResourceExhausted,
-			codes.Internal,
-			codes.Aborted,
+		},
+		RetryableMethods: []string{
+			"/account.v1.AccountService/GetAccount",
+			"/account.v1.AccountService/GetBalance",
+			"/ledger.v1.LedgerService/GetBalance",
+			"/payment.v1.PaymentService/GetPayment",
+			"/auth.v1.AuthService/VerifyToken",
+			"/ledger.v1.LedgerService/PostEntries",
+			"/payment.v1.PaymentService/CreatePayment",
 		},
 	}
 }
@@ -42,8 +51,8 @@ func DefaultRetryConfig() RetryConfig {
 // UnaryClientRetry returns a client-side gRPC interceptor that retries failed
 // calls with exponential backoff and jitter.
 func UnaryClientRetry(cfg RetryConfig) grpc.UnaryClientInterceptor {
-	if cfg.MaxRetries <= 0 {
-		cfg.MaxRetries = 3
+	if cfg.MaxRetries < 0 {
+		cfg.MaxRetries = 0
 	}
 	if cfg.BaseDelay <= 0 {
 		cfg.BaseDelay = 100 * time.Millisecond
@@ -54,55 +63,73 @@ func UnaryClientRetry(cfg RetryConfig) grpc.UnaryClientInterceptor {
 	if len(cfg.RetryableCodes) == 0 {
 		cfg.RetryableCodes = DefaultRetryConfig().RetryableCodes
 	}
+	if cfg.RetryableMethods == nil {
+		cfg.RetryableMethods = DefaultRetryConfig().RetryableMethods
+	}
 
 	retryableSet := make(map[codes.Code]bool, len(cfg.RetryableCodes))
 	for _, c := range cfg.RetryableCodes {
 		retryableSet[c] = true
 	}
+	retryableMethods := make(map[string]bool, len(cfg.RetryableMethods))
+	for _, method := range cfg.RetryableMethods {
+		retryableMethods[method] = true
+	}
 
 	return func(ctx context.Context, method string, req, reply any, cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
-		var lastErr error
-
-		for attempt := 0; attempt <= cfg.MaxRetries; attempt++ {
+		for attempt := 0; ; attempt++ {
 			// Check context before each attempt
 			if ctx.Err() != nil {
-				return ctx.Err()
+				return status.FromContextError(ctx.Err()).Err()
 			}
 
 			err := invoker(ctx, method, req, reply, cc, opts...)
+			if ctx.Err() != nil {
+				return status.FromContextError(ctx.Err()).Err()
+			}
 			if err == nil {
 				return nil
 			}
 
-			lastErr = err
-
 			// Don't retry if this is the last attempt
-			if attempt == cfg.MaxRetries {
-				break
+			if attempt == cfg.MaxRetries || !retryableMethods[method] {
+				return err
 			}
 
 			// Only retry on retryable codes
 			st, ok := status.FromError(err)
 			if !ok || !retryableSet[st.Code()] {
-				break
+				return err
 			}
 
 			// Exponential backoff with jitter
-			delay := time.Duration(float64(cfg.BaseDelay) * math.Pow(2, float64(attempt)))
-			if delay > cfg.MaxDelay {
-				delay = cfg.MaxDelay
-			}
-			// Add jitter: ±25%
-			jitter := time.Duration(float64(delay) * 0.25 * (2*rand.Float64() - 1))
-			delay += jitter
-
+			timer := time.NewTimer(retryDelay(cfg, attempt))
 			select {
-			case <-time.After(delay):
+			case <-timer.C:
 			case <-ctx.Done():
-				return ctx.Err()
+				timer.Stop()
+				return status.FromContextError(ctx.Err()).Err()
 			}
 		}
-
-		return lastErr
 	}
+}
+
+func retryDelay(cfg RetryConfig, attempt int) time.Duration {
+	delay := cfg.BaseDelay
+	if delay > cfg.MaxDelay {
+		delay = cfg.MaxDelay
+	}
+	for i := 0; i < attempt && delay < cfg.MaxDelay; i++ {
+		if delay > cfg.MaxDelay/2 {
+			delay = cfg.MaxDelay
+		} else {
+			delay *= 2
+		}
+	}
+	// Clamp after jitter as well as before it, including duration-overflow cases.
+	jittered := float64(delay) * (0.75 + 0.5*rand.Float64())
+	if jittered >= float64(cfg.MaxDelay) {
+		return cfg.MaxDelay
+	}
+	return time.Duration(jittered)
 }

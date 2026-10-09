@@ -39,7 +39,8 @@ func main() {
 	log.Info("starting payment-service", slog.Int("port", cfg.Server.GRPCPort))
 
 	// Connect to Database
-	ctx := context.Background()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	pool, err := pgxpool.New(ctx, cfg.Database.DatabaseURL)
 	if err != nil {
 		log.Error("failed to create pgx pool", slog.Any("error", err))
@@ -78,7 +79,8 @@ func main() {
 		var err error
 		eb, err = eventbus.NewNatsEventBus(cfg.Nats.NatsURL, log)
 		if err != nil {
-			log.Warn("NATS unavailable, event-driven saga disabled", slog.Any("error", err))
+			log.Error("NATS setup failed", slog.Any("error", err))
+			os.Exit(1)
 		} else {
 			defer eb.Close()
 			log.Info("connected to NATS")
@@ -88,6 +90,7 @@ func main() {
 	// gRPC clients with circuit breaker + retry
 	accountConn, _ := grpc.NewClient(cfg.Service.AccountGRPCAddr,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithDefaultCallOptions(grpc.WaitForReady(true)),
 		grpc.WithChainUnaryInterceptor(
 			middleware.UnaryClientCircuitBreaker(middleware.DefaultCircuitBreakerConfig()),
 			middleware.UnaryClientRetry(middleware.DefaultRetryConfig()),
@@ -98,6 +101,7 @@ func main() {
 
 	ledgerConn, _ := grpc.NewClient(cfg.Service.LedgerGRPCAddr,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithDefaultCallOptions(grpc.WaitForReady(true)),
 		grpc.WithChainUnaryInterceptor(
 			middleware.UnaryClientCircuitBreaker(middleware.DefaultCircuitBreakerConfig()),
 			middleware.UnaryClientRetry(middleware.DefaultRetryConfig()),
@@ -112,16 +116,16 @@ func main() {
 
 	// Outbox publisher
 	if eb != nil {
-		go eventbus.RunOutboxPublisher(context.Background(), pool, eb, log, 1*time.Second)
+		go eventbus.RunOutboxPublisher(ctx, pool, eb, log, 1*time.Second)
 
 		// Event consumers with idempotency
-		ledgerPostedHandler := eventbus.WithIdempotency(pool, "payment-ledger-posted",
+		ledgerPostedHandler := eventbus.WithTransactionalIdempotency(pool, "payment-ledger-posted",
 			paymentconsumer.LedgerPostedHandler(paymentRepo, log))
-		eb.Subscribe(context.Background(), "ledger.posted", "payment-service", ledgerPostedHandler)
+		if err := eb.Subscribe(ctx, "ledger.posted", "payment-service", ledgerPostedHandler); err != nil {
+			log.Error("ledger notification subscription failed", slog.Any("error", err))
+			os.Exit(1)
+		}
 
-		fundsFailHandler := eventbus.WithIdempotency(pool, "payment-funds-failed",
-			paymentconsumer.FundsReservationFailedHandler(paymentRepo, log))
-		eb.Subscribe(context.Background(), "funds.reservation.failed", "payment-service", fundsFailHandler)
 	}
 
 	// Set up gRPC server
@@ -143,6 +147,7 @@ func main() {
 		signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 		sig := <-sigCh
 		log.Info("received signal, shutting down", slog.String("signal", sig.String()))
+		cancel()
 		healthServer.Shutdown()
 		grpcServer.GracefulStop()
 	}()

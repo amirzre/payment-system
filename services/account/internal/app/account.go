@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -69,7 +70,7 @@ func (s *accountService) Create(ctx context.Context, accountReq CreateAccountReq
 	account := domain.Account{
 		ID:        uuid.New(),
 		OwnerRef:  accountReq.OwnerRef,
-		Currency:  accountReq.Currency,
+		Currency:  currency,
 		Status:    domain.StatusActive,
 		CreatedAt: time.Now().UTC(),
 	}
@@ -101,9 +102,9 @@ func (s *accountService) GetBalance(ctx context.Context, accountID uuid.UUID) (*
 	if s.redisClient != nil {
 		val, err := s.redisClient.Get(ctx, cacheKey).Result()
 		if err == nil {
-			var balance int64
-			var currency string
-			if _, scanErr := fmt.Scanf(val, "%d:%s", &balance, &currency); scanErr == nil {
+			amount, currency, found := strings.Cut(val, ":")
+			balance, parseErr := strconv.ParseInt(amount, 10, 64)
+			if found && parseErr == nil && len(currency) == 3 && strings.IndexFunc(currency, func(r rune) bool { return r < 'A' || r > 'Z' }) == -1 {
 				return &BalanceResponse{BalanceMinor: balance, Currency: currency}, nil
 			}
 		}
@@ -123,6 +124,13 @@ func (s *accountService) GetBalance(ctx context.Context, accountID uuid.UUID) (*
 	result := &BalanceResponse{
 		BalanceMinor: resp.GetBalanceMinor(),
 		Currency:     resp.GetCurrency(),
+	}
+	if result.Currency == "" {
+		account, err := s.GetByID(ctx, accountID)
+		if err != nil {
+			return nil, err
+		}
+		result.Currency = account.Currency
 	}
 
 	if s.redisClient != nil {

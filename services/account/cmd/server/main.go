@@ -38,7 +38,8 @@ func main() {
 	log.Info("starting account-service", slog.Int("port", cfg.Server.GRPCPort))
 
 	// Connect to Database
-	ctx := context.Background()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	pool, err := pgxpool.New(ctx, cfg.Database.DatabaseURL)
 	if err != nil {
 		log.Error("failed to create pgx pool", slog.Any("error", err))
@@ -77,7 +78,8 @@ func main() {
 		var err error
 		eb, err = eventbus.NewNatsEventBus(cfg.Nats.NatsURL, log)
 		if err != nil {
-			log.Warn("NATS unavailable", slog.Any("error", err))
+			log.Error("NATS setup failed", slog.Any("error", err))
+			os.Exit(1)
 		} else {
 			defer eb.Close()
 		}
@@ -86,6 +88,7 @@ func main() {
 	// gRPC client to ledger-service
 	ledgerConn, _ := grpc.NewClient(cfg.Service.LedgerGRPCAddr,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithDefaultCallOptions(grpc.WaitForReady(true)),
 		grpc.WithChainUnaryInterceptor(
 			middleware.UnaryClientCircuitBreaker(middleware.DefaultCircuitBreakerConfig()),
 			middleware.UnaryClientRetry(middleware.DefaultRetryConfig()),
@@ -101,19 +104,14 @@ func main() {
 
 	// Outbox + consumers
 	if eb != nil {
-		go eventbus.RunOutboxPublisher(context.Background(), pool, eb, log, 1*time.Second)
-
-		selfConn, _ := grpc.NewClient(fmt.Sprintf("localhost:%d", cfg.Server.GRPCPort),
-			grpc.WithTransportCredentials(insecure.NewCredentials()))
-		selfClient := accountv1.NewAccountServiceClient(selfConn)
-
-		payReqHandler := eventbus.WithIdempotency(pool, "account-payment-requested",
-			accountconsumer.PaymentRequestedHandler(selfClient, eb, log))
-		eb.Subscribe(context.Background(), "payment.requested", "account-service", payReqHandler)
+		go eventbus.RunOutboxPublisher(ctx, pool, eb, log, 1*time.Second)
 
 		cacheHandler := eventbus.WithIdempotency(pool, "account-cache-invalidation",
 			accountconsumer.CacheInvalidationHandler(rdb, log))
-		eb.Subscribe(context.Background(), "ledger.posted", "account-service-cache", cacheHandler)
+		if err := eb.Subscribe(ctx, "ledger.posted", "account-service-cache", cacheHandler); err != nil {
+			log.Error("cache notification subscription failed", slog.Any("error", err))
+			os.Exit(1)
+		}
 	}
 
 	// Set up gRPC server
@@ -136,6 +134,7 @@ func main() {
 		signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 		sig := <-sigCh
 		log.Info("received signal, shutting down", slog.String("signal", sig.String()))
+		cancel()
 		healthServer.Shutdown()
 		grpcServer.GracefulStop()
 	}()
