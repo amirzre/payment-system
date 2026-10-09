@@ -33,6 +33,6 @@ COPY --from=builder /out/auth-service /app/auth-service
 
 EXPOSE 50054
 
-USER appuser:appuser
+USER 1000:1000
 
 ENTRYPOINT ["/app/auth-service"]

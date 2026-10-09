@@ -27,12 +27,12 @@ FROM alpine:3.23
 
 RUN apk add --no-cache ca-certificates tzdata
 
-RUN addgroup -g 1000 appuser && adduser -u 1000 -G appuser -D -s /bin/sh appuser
+RUN addgroup -S -g 10001 appgroup && adduser -S -D -H -u 10001 -G appgroup appuser
 
 COPY --from=builder /out/account-service /app/account-service
 
 EXPOSE 50051
 
-USER appuser:appuser
+USER 10001:10001
 
 ENTRYPOINT ["/app/account-service"]

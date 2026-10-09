@@ -9,7 +9,7 @@ metadata:
 spec:
   clusterIP: None
   selector:
-    name: account-postgres
+    app.kubernetes.io/name: account-postgres
   ports:
     - name: postgres
       port: 5432
@@ -110,7 +110,7 @@ metadata:
 spec:
   clusterIP: None
   selector:
-    name: auth-postgres
+    app.kubernetes.io/name: auth-postgres
   ports:
     - name: postgres
       port: 5432
@@ -211,7 +211,7 @@ metadata:
 spec:
   clusterIP: None
   selector:
-    name: ledger-postgres
+    app.kubernetes.io/name: ledger-postgres
   ports:
     - name: postgres
       port: 5432
@@ -312,7 +312,7 @@ metadata:
 spec:
   clusterIP: None
   selector:
-    name: payment-postgres
+    app.kubernetes.io/name: payment-postgres
   ports:
     - name: postgres
       port: 5432

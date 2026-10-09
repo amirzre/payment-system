@@ -33,6 +33,6 @@ COPY --from=builder /out/api-gateway /app/api-gateway
 
 EXPOSE 8080
 
-USER appuser:appuser
+USER 1000:1000
 
 ENTRYPOINT ["/app/api-gateway"]
