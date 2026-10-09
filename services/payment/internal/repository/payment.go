@@ -73,7 +73,6 @@ func (r *paymentRepository) GetByID(ctx context.Context, id uuid.UUID) (*domain.
 		&payment.DestinationAccountID,
 		&payment.AmountMinor,
 		&payment.Currency,
-		&payment.Currency,
 		&payment.Status,
 		&payment.TransactionID,
 		&payment.CreatedAt,

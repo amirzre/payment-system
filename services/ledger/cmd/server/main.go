@@ -17,6 +17,7 @@ import (
 	ledgerconsumer "github.com/amirzre/payment-system/services/ledger/internal/transport/consumer"
 	ledgertransport "github.com/amirzre/payment-system/services/ledger/internal/transport/grpc"
 	"github.com/amirzre/payment-system/shared/eventbus"
+	"github.com/amirzre/payment-system/shared/healthcheck"
 	"github.com/amirzre/payment-system/shared/logger"
 	"github.com/amirzre/payment-system/shared/middleware"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -77,6 +78,7 @@ func main() {
 	grpcServer := grpc.NewServer(middleware.UnaryServerChain(log))
 	ledgerv1.RegisterLedgerServiceServer(grpcServer, ledgerServer)
 
+	healthServer := healthcheck.RegisterGRPC(grpcServer)
 	reflection.Register(grpcServer)
 
 	// Start listening
@@ -92,6 +94,7 @@ func main() {
 		signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 		sig := <-sigCh
 		log.Info("received signal, shutting down", slog.String("signal", sig.String()))
+		healthServer.Shutdown()
 		grpcServer.GracefulStop()
 	}()
 

@@ -18,8 +18,10 @@ import (
 	accountconsumer "github.com/amirzre/payment-system/services/account/internal/transport/consumer"
 	accounttransport "github.com/amirzre/payment-system/services/account/internal/transport/grpc"
 	"github.com/amirzre/payment-system/shared/eventbus"
+	"github.com/amirzre/payment-system/shared/healthcheck"
 	"github.com/amirzre/payment-system/shared/logger"
 	"github.com/amirzre/payment-system/shared/middleware"
+	"github.com/amirzre/payment-system/shared/redisclient"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
 	"google.golang.org/grpc"
@@ -53,9 +55,19 @@ func main() {
 	// Connect to Redis
 	var rdb *redis.Client
 	if cfg.Redis.RedisURL != "" {
-		rdb = redis.NewClient(&redis.Options{Addr: cfg.Redis.RedisURL})
-		if rdb.Ping(ctx).Err() != nil {
+		redisOptions, err := redisclient.Options(cfg.Redis.RedisURL)
+		if err != nil {
+			log.Error("invalid Redis configuration", slog.Any("error", err))
+			os.Exit(1)
+		}
+		rdb = redis.NewClient(redisOptions)
+		if err := rdb.Ping(ctx).Err(); err != nil {
+			log.Warn("Redis unavailable, cache disabled", slog.Any("error", err))
+			rdb.Close()
 			rdb = nil
+		} else {
+			defer rdb.Close()
+			log.Info("connected to Redis")
 		}
 	}
 
@@ -108,6 +120,7 @@ func main() {
 	grpcServer := grpc.NewServer(middleware.UnaryServerChain(log))
 	accountv1.RegisterAccountServiceServer(grpcServer, accountServer)
 
+	healthServer := healthcheck.RegisterGRPC(grpcServer)
 	reflection.Register(grpcServer)
 
 	// Start listening
@@ -123,6 +136,7 @@ func main() {
 		signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 		sig := <-sigCh
 		log.Info("received signal, shutting down", slog.String("signal", sig.String()))
+		healthServer.Shutdown()
 		grpcServer.GracefulStop()
 	}()
 

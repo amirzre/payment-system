@@ -15,6 +15,7 @@ import (
 	"github.com/amirzre/payment-system/services/auth/internal/domain"
 	"github.com/amirzre/payment-system/services/auth/internal/repository"
 	authgrpc "github.com/amirzre/payment-system/services/auth/internal/transport/grpc"
+	"github.com/amirzre/payment-system/shared/healthcheck"
 	"github.com/amirzre/payment-system/shared/logger"
 	"github.com/amirzre/payment-system/shared/middleware"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -61,6 +62,7 @@ func main() {
 	authServer := authgrpc.NewAuthServer(authSrv)
 	authv1.RegisterAuthServiceServer(grpcServer, authServer)
 
+	healthServer := healthcheck.RegisterGRPC(grpcServer)
 	reflection.Register(grpcServer)
 
 	// Start listening
@@ -76,6 +78,7 @@ func main() {
 		signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 		sig := <-sigCh
 		log.Info("received signal, shutting down", slog.String("signal", sig.String()))
+		healthServer.Shutdown()
 		grpcServer.GracefulStop()
 	}()
 

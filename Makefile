@@ -2,6 +2,7 @@
 .PHONY: proto-gen proto-lint build lint fmt test test-race test-all tidy work-sync clean
 .PHONY: docker-build docker-up docker-down docker-down-volumes
 .PHONY: migrate-up migrate-down generate-keys
+.PHONY: kind-load k8s-deploy k8s-migrate
 .PHONY: ci ci-account ci-api-gateway ci-auth ci-ledger ci-payment ci-shared
 
 # Default target
@@ -98,6 +99,20 @@ docker-down: ## Stop all services
 
 docker-down-volumes: ## Stop all services and destroy volumes (data loss)
 	docker compose down -v
+
+# Kubernetes / local kind
+
+KIND_CLUSTER ?= payment-system
+KUBE_CONTEXT ?= kind-$(KIND_CLUSTER)
+
+kind-load: ## Load the built service images into kind
+	KIND_CLUSTER="$(KIND_CLUSTER)" bash deploy/k8s/kind-load.sh
+
+k8s-deploy: ## Apply infrastructure, run migrations, then roll out services
+	KUBE_CONTEXT="$(KUBE_CONTEXT)" bash deploy/k8s/deploy.sh deploy
+
+k8s-migrate: ## Apply pending migrations inside Kubernetes (safe to repeat)
+	KUBE_CONTEXT="$(KUBE_CONTEXT)" bash deploy/k8s/deploy.sh migrate
 
 # Database migrations (local dev)
 
