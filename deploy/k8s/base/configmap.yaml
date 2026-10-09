@@ -1,9 +1,0 @@
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: payment-system-config
-  namespace: payment-system
-data:
-  server-environment: production
-  nats-url: nats://nats:4222
-  redis-url: redis:6379
