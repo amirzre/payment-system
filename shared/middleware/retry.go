@@ -5,6 +5,7 @@ import (
 	"math/rand"
 	"time"
 
+	"github.com/amirzre/payment-system/shared/metrics"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -83,6 +84,9 @@ func UnaryClientRetry(cfg RetryConfig) grpc.UnaryClientInterceptor {
 				return status.FromContextError(ctx.Err()).Err()
 			}
 
+			if attempt > 0 {
+				metrics.RecordRetry(method)
+			}
 			err := invoker(ctx, method, req, reply, cc, opts...)
 			if ctx.Err() != nil {
 				return status.FromContextError(ctx.Err()).Err()

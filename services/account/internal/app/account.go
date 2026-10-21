@@ -7,13 +7,14 @@ import (
 	"strings"
 	"time"
 
+	ledgerv1 "github.com/amirzre/payment-system/gen/go/ledger/v1"
 	"github.com/amirzre/payment-system/services/account/internal/domain"
 	"github.com/amirzre/payment-system/services/account/internal/repository"
+	sharederrors "github.com/amirzre/payment-system/shared/errors"
+	"github.com/amirzre/payment-system/shared/metrics"
 	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
-
-	ledgerv1 "github.com/amirzre/payment-system/gen/go/ledger/v1"
-	sharederrors "github.com/amirzre/payment-system/shared/errors"
+	"go.opentelemetry.io/otel"
 )
 
 // CreateAccountInput holds the data needed to create an account.
@@ -58,6 +59,8 @@ func NewAccountService(
 
 // Create creates a new account after validating the input and domain rules.
 func (s *accountService) Create(ctx context.Context, accountReq CreateAccountReq) (*domain.Account, error) {
+	ctx, operationSpan := otel.Tracer("payment-system/account").Start(ctx, "account.create")
+	defer operationSpan.End()
 	if strings.TrimSpace(accountReq.OwnerRef) == "" {
 		return nil, fmt.Errorf("owner_ref must not be empty")
 	}
@@ -84,6 +87,8 @@ func (s *accountService) Create(ctx context.Context, accountReq CreateAccountReq
 
 // GetByID retrieves an account by its ID.
 func (s *accountService) GetByID(ctx context.Context, id uuid.UUID) (*domain.Account, error) {
+	ctx, operationSpan := otel.Tracer("payment-system/account").Start(ctx, "account.get")
+	defer operationSpan.End()
 	account, err := s.repo.GetByID(ctx, id)
 	if err != nil {
 		return nil, sharederrors.Wrap(sharederrors.KindInternal, "failed to query account", err)
@@ -97,6 +102,8 @@ func (s *accountService) GetByID(ctx context.Context, id uuid.UUID) (*domain.Acc
 
 // GetBalance retrieves the balance, using Redis cache if available.
 func (s *accountService) GetBalance(ctx context.Context, accountID uuid.UUID) (*BalanceResponse, error) {
+	ctx, operationSpan := otel.Tracer("payment-system/account").Start(ctx, "account.balance")
+	defer operationSpan.End()
 	cacheKey := fmt.Sprintf("balance:%s", accountID.String())
 
 	if s.redisClient != nil {
@@ -105,8 +112,14 @@ func (s *accountService) GetBalance(ctx context.Context, accountID uuid.UUID) (*
 			amount, currency, found := strings.Cut(val, ":")
 			balance, parseErr := strconv.ParseInt(amount, 10, 64)
 			if found && parseErr == nil && len(currency) == 3 && strings.IndexFunc(currency, func(r rune) bool { return r < 'A' || r > 'Z' }) == -1 {
+				metrics.RecordCache("get", "hit")
 				return &BalanceResponse{BalanceMinor: balance, Currency: currency}, nil
 			}
+		}
+		if err != nil && err != redis.Nil {
+			metrics.RecordCache("get", "error")
+		} else {
+			metrics.RecordCache("get", "miss")
 		}
 	}
 
@@ -135,7 +148,11 @@ func (s *accountService) GetBalance(ctx context.Context, accountID uuid.UUID) (*
 
 	if s.redisClient != nil {
 		cacheVal := fmt.Sprintf("%d:%s", result.BalanceMinor, result.Currency)
-		s.redisClient.Set(ctx, cacheKey, cacheVal, 60*time.Second)
+		if err := s.redisClient.Set(ctx, cacheKey, cacheVal, 60*time.Second).Err(); err != nil {
+			metrics.RecordCache("set", "error")
+		} else {
+			metrics.RecordCache("set", "success")
+		}
 	}
 
 	return result, nil
@@ -143,6 +160,8 @@ func (s *accountService) GetBalance(ctx context.Context, accountID uuid.UUID) (*
 
 // Deposit validates the account and currency, then delegates the credit entry to ledger-service.
 func (s *accountService) Deposit(ctx context.Context, accountID uuid.UUID, amount int64, currency string) (*BalanceResponse, error) {
+	ctx, operationSpan := otel.Tracer("payment-system/account").Start(ctx, "account.deposit")
+	defer operationSpan.End()
 	if amount <= 0 {
 		return nil, sharederrors.New(sharederrors.KindInvalidArgument,
 			fmt.Sprintf("amount must be positive, got %d", amount))
@@ -180,7 +199,11 @@ func (s *accountService) Deposit(ctx context.Context, accountID uuid.UUID, amoun
 
 	if s.redisClient != nil {
 		cacheKey := fmt.Sprintf("balance:%s", accountID.String())
-		s.redisClient.Del(ctx, cacheKey)
+		if err := s.redisClient.Del(ctx, cacheKey).Err(); err != nil {
+			metrics.RecordCache("invalidate", "error")
+		} else {
+			metrics.RecordCache("invalidate", "success")
+		}
 	}
 
 	return &BalanceResponse{

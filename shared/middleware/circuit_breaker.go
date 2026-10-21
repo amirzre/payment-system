@@ -5,6 +5,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/amirzre/payment-system/shared/metrics"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -66,7 +67,7 @@ func newCircuitBreaker(cfg CircuitBreakerConfig) *circuitBreaker {
 
 // admit returns a generation ticket, so calls admitted before a state transition
 // cannot change the failure or recovery counters of a newer circuit generation.
-func (cb *circuitBreaker) admit() (generation uint64, probe, allowed bool) {
+func (cb *circuitBreaker) admit(method ...string) (generation uint64, probe, allowed bool) {
 	cb.mu.Lock()
 	defer cb.mu.Unlock()
 
@@ -78,6 +79,7 @@ func (cb *circuitBreaker) admit() (generation uint64, probe, allowed bool) {
 			return 0, false, false
 		}
 		cb.state = CircuitHalfOpen
+		recordTransition(method, "half_open")
 		cb.generation++
 		cb.successCount = 0
 	}
@@ -90,7 +92,7 @@ func (cb *circuitBreaker) admit() (generation uint64, probe, allowed bool) {
 
 // record treats caller cancellation as neutral: it releases a recovery permit
 // without adding a dependency failure or claiming a successful recovery.
-func (cb *circuitBreaker) record(generation uint64, probe, failed, canceled bool) {
+func (cb *circuitBreaker) record(generation uint64, probe, failed, canceled bool, method ...string) {
 	cb.mu.Lock()
 	defer cb.mu.Unlock()
 
@@ -107,6 +109,7 @@ func (cb *circuitBreaker) record(generation uint64, probe, failed, canceled bool
 		cb.failureCount++
 		if cb.state == CircuitHalfOpen || cb.failureCount >= cb.cfg.FailureThreshold {
 			cb.state = CircuitOpen
+			recordTransition(method, "open")
 			cb.generation++
 			cb.successCount = 0
 			cb.lastFailureTime = cb.now()
@@ -118,6 +121,7 @@ func (cb *circuitBreaker) record(generation uint64, probe, failed, canceled bool
 		cb.successCount++
 		if cb.successCount >= cb.cfg.SuccessThreshold {
 			cb.state = CircuitClosed
+			recordTransition(method, "closed")
 			cb.generation++
 			cb.successCount = 0
 		}
@@ -133,18 +137,20 @@ func UnaryClientCircuitBreaker(cfg CircuitBreakerConfig) grpc.UnaryClientInterce
 }
 
 func unaryClientCircuitBreaker(cb *circuitBreaker) grpc.UnaryClientInterceptor {
-	return func(ctx context.Context, method string, req, reply any, cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
+	return func(ctx context.Context, method string, req, reply any, cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) (callErr error) {
+		start := time.Now()
+		defer func() { metrics.RecordLogical(method, status.Code(callErr).String(), time.Since(start).Seconds()) }()
 		if ctx.Err() != nil {
 			return status.FromContextError(ctx.Err()).Err()
 		}
-		generation, probe, allowed := cb.admit()
+		generation, probe, allowed := cb.admit(method)
 		if !allowed {
 			return status.Error(codes.Unavailable, "circuit breaker open")
 		}
 
 		err := invoker(ctx, method, req, reply, cc, opts...)
 		canceled := ctx.Err() != nil
-		cb.record(generation, probe, err != nil && isServerError(err), canceled)
+		cb.record(generation, probe, err != nil && isServerError(err), canceled, method)
 		if canceled {
 			return status.FromContextError(ctx.Err()).Err()
 		}
@@ -165,4 +171,10 @@ func isServerError(err error) bool {
 		return true
 	}
 	return false
+}
+
+func recordTransition(method []string, state string) {
+	if len(method) > 0 {
+		metrics.RecordBreaker(method[0], state)
+	}
 }

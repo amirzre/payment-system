@@ -7,6 +7,7 @@ import (
 	"log/slog"
 
 	"github.com/amirzre/payment-system/shared/eventbus"
+	"github.com/amirzre/payment-system/shared/metrics"
 	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
 )
@@ -47,14 +48,17 @@ func CacheInvalidationHandler(redisClient *redis.Client, log *slog.Logger) event
 		}
 
 		if redisClient == nil {
+			metrics.RecordCache("invalidate", "error")
 			return fmt.Errorf("Redis unavailable for ledger.posted cache invalidation")
 		}
 
 		if err := redisClient.Del(ctx, cacheKeys...).Err(); err != nil {
+			metrics.RecordCache("invalidate", "error")
 			return fmt.Errorf("invalidating ledger.posted balance cache: %w", err)
 		}
 
-		log.Debug("balance cache invalidated",
+		metrics.RecordCache("invalidate", "success")
+		log.DebugContext(ctx, "balance cache invalidated",
 			slog.String("source", evt.SourceAccountID),
 			slog.String("dest", evt.DestinationAccountID),
 		)

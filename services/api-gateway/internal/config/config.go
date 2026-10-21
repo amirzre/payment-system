@@ -9,8 +9,8 @@ import (
 
 // Config holds the configuration for the account service.
 type Config struct {
-	Server   ServerConfig
-	Service  ServiceConfig
+	Server  ServerConfig
+	Service ServiceConfig
 }
 
 // ServerConfig holds server configuration.
@@ -37,8 +37,8 @@ func Load() *Config {
 		},
 		ServiceConfig{
 			AccountGRPCAddr: getEnv("ACCOUNT_GRPC_ADDR", "http://localhost:50051"),
-			PaymentGRPCAddr:  getEnv("PAYMENT_GRPC_ADDR", "http://localhost:50053"),
-			AuthGRPCAddr: getEnv("AUTH_GRPC_ADDR", "http://localhost:50054"),
+			PaymentGRPCAddr: getEnv("PAYMENT_GRPC_ADDR", "http://localhost:50053"),
+			AuthGRPCAddr:    getEnv("AUTH_GRPC_ADDR", "http://localhost:50054"),
 		},
 	}
 }

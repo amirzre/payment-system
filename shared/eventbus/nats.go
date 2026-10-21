@@ -9,7 +9,12 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/amirzre/payment-system/shared/metrics"
 	"github.com/nats-io/nats.go"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/propagation"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // NatsEventBus implements PublisherSubscriber using NATS JetStream.
@@ -102,7 +107,19 @@ func ensureStream(js nats.JetStreamContext, subject string) error {
 // A nonempty key must identify one event on that subject. JetStream suppresses
 // duplicate publications within the stream's duplicate window; consumers still
 // need durable idempotency for deliveries outside that window.
-func (n *NatsEventBus) Publish(ctx context.Context, subject string, key string, event any) error {
+func (n *NatsEventBus) Publish(ctx context.Context, subject string, key string, event any) (publishErr error) {
+	ctx, span := otel.Tracer(tracerName).Start(
+		ctx,
+		"nats publish",
+		trace.WithSpanKind(trace.SpanKindProducer),
+		trace.WithAttributes(eventAttributes(subject)...),
+	)
+	defer func() {
+		if publishErr != nil {
+			span.SetStatus(codes.Error, "publication failed")
+		}
+		span.End()
+	}()
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -124,6 +141,7 @@ func (n *NatsEventBus) Publish(ctx context.Context, subject string, key string, 
 		msg.Header.Set(nats.MsgIdHdr, fmt.Sprintf("%x", id))
 	}
 
+	propagation.TraceContext{}.Inject(ctx, propagation.HeaderCarrier(msg.Header))
 	_, err = n.js.PublishMsg(msg, nats.Context(ctx))
 	if err != nil {
 		return fmt.Errorf("publishing to %s: %w", subject, err)
@@ -180,7 +198,7 @@ func (n *NatsEventBus) Subscribe(ctx context.Context, subject, consumerName stri
 	go func() {
 		defer func() {
 			if err := sub.Unsubscribe(); err != nil && !errors.Is(err, nats.ErrBadSubscription) {
-				n.log.Error("unsubscribing", slog.String("subject", subject), slog.Any("error", err))
+				n.log.ErrorContext(ctx, "unsubscribing", slog.String("subject", boundedSubject(subject)))
 			}
 		}()
 		for {
@@ -200,7 +218,7 @@ func (n *NatsEventBus) Subscribe(ctx context.Context, subject, consumerName stri
 				if errors.Is(err, nats.ErrTimeout) || errors.Is(err, context.DeadlineExceeded) {
 					continue
 				}
-				n.log.Error("fetching messages", slog.String("subject", subject), slog.Any("error", err))
+				n.log.ErrorContext(ctx, "fetching messages", slog.String("subject", boundedSubject(subject)))
 				select {
 				case <-ctx.Done():
 					return
@@ -213,34 +231,54 @@ func (n *NatsEventBus) Subscribe(ctx context.Context, subject, consumerName stri
 				if ctx.Err() != nil {
 					return
 				}
-				key := ""
-				if msg.Header != nil {
-					key = msg.Header.Get("X-Message-Key")
-				}
-
-				if err := h(ctx, key, msg.Data); err != nil {
-					n.log.Error("handling event",
-						slog.String("subject", subject),
-						slog.String("key", key),
-						slog.Any("error", err),
-					)
-					if err := msg.NakWithDelay(time.Second); err != nil {
-						n.log.Error("delaying event retry", slog.String("subject", subject), slog.Any("error", err))
-					}
-					continue
-				}
-
-				ackCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-				err := msg.AckSync(nats.Context(ackCtx))
-				cancel()
-				if err != nil {
-					n.log.Error("acknowledging event", slog.String("subject", subject), slog.String("key", key), slog.Any("error", err))
-				}
+				n.processMessage(ctx, subject, consumerName, msg, h)
 			}
 		}
 	}()
 
 	return nil
+}
+
+// processMessage uses each delivery's producer parent, so retries get separate
+// consumer spans without changing message identity, acknowledgment or effects.
+func (n *NatsEventBus) processMessage(ctx context.Context, subject, consumerName string, msg *nats.Msg, h Handler) {
+	ctx = extractEventContext(ctx, propagation.HeaderCarrier(msg.Header))
+	ctx, span := otel.Tracer(tracerName).Start(
+		ctx,
+		"nats process",
+		trace.WithSpanKind(trace.SpanKindConsumer),
+		trace.WithAttributes(eventAttributes(subject)...),
+	)
+	delivery := &deliveryResult{}
+	ctx = context.WithValue(ctx, deliveryResultKey{}, delivery)
+	started := time.Now()
+	outcome := "error"
+	defer func() {
+		metrics.RecordEvent(subject, consumerName, outcome, time.Since(started).Seconds())
+		if outcome == "error" {
+			span.SetStatus(codes.Error, "processing failed")
+		}
+		span.End()
+	}()
+	key := msg.Header.Get("X-Message-Key")
+	if err := h(ctx, key, msg.Data); err != nil {
+		n.log.ErrorContext(ctx, "handling event", slog.String("subject", boundedSubject(subject)))
+		if err := msg.NakWithDelay(time.Second); err != nil {
+			n.log.ErrorContext(ctx, "delaying event retry", slog.String("subject", boundedSubject(subject)))
+		}
+		return
+	}
+	ackCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	err := msg.AckSync(nats.Context(ackCtx))
+	cancel()
+	if err != nil {
+		n.log.ErrorContext(ctx, "acknowledging event", slog.String("subject", boundedSubject(subject)))
+		return
+	}
+	outcome = "success"
+	if delivery.duplicate.Load() {
+		outcome = "duplicate"
+	}
 }
 
 // Close closes the NATS connection.

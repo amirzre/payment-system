@@ -20,5 +20,5 @@ func New(env, serviceName string) *slog.Logger {
 		handler = slog.NewTextHandler(os.Stdout, opts)
 	}
 
-	return slog.New(handler).With(slog.String("service", serviceName))
+	return slog.New(ContextHandler(handler)).With(slog.String("service", serviceName))
 }

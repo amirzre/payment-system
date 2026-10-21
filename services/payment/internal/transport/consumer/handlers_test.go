@@ -31,7 +31,7 @@ func TestLedgerNotificationReconcilesAndDeduplicates(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer pool.Close()
-	if _, err := pool.Exec(ctx, `CREATE TEMP TABLE payment_intents (LIKE public.payment_intents INCLUDING ALL); CREATE TEMP TABLE outbox (LIKE public.outbox INCLUDING ALL); CREATE TEMP TABLE processed_events (LIKE public.processed_events INCLUDING ALL)`); err != nil {
+	if _, err := pool.Exec(ctx, `CREATE TEMP TABLE payment_intents (LIKE public.payment_intents INCLUDING ALL); CREATE TEMP TABLE outbox (LIKE public.outbox INCLUDING ALL); ALTER TABLE outbox ADD COLUMN IF NOT EXISTS trace_context JSONB NOT NULL DEFAULT '{}'; CREATE TEMP TABLE processed_events (LIKE public.processed_events INCLUDING ALL)`); err != nil {
 		t.Fatal(err)
 	}
 	repo := repository.NewPaymentRepository(pool)

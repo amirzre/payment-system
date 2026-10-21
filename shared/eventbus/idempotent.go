@@ -3,10 +3,17 @@ package eventbus
 import (
 	"context"
 	"fmt"
+	"sync/atomic"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+// deliveryResult is scoped to one NATS delivery. The idempotency wrapper
+// reports a skip without changing Handler's error contract; the subscriber
+// records exactly one final outcome using its actual subject and consumer.
+type deliveryResultKey struct{}
+type deliveryResult struct{ duplicate atomic.Bool }
 
 // TransactionalHandler must perform its database effects using the supplied
 // transaction, so they commit atomically with the processed_events marker.
@@ -51,6 +58,9 @@ func withIdempotency(db *pgxpool.Pool, consumerName string, h func(context.Conte
 		// The unique constraint waits for an in-flight duplicate to commit or
 		// roll back. Only the delivery that inserted the marker may run h.
 		if result.RowsAffected() == 0 {
+			if delivery, ok := ctx.Value(deliveryResultKey{}).(*deliveryResult); ok {
+				delivery.duplicate.Store(true)
+			}
 			return nil
 		}
 

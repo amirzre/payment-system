@@ -6,6 +6,7 @@ import (
 	"github.com/amirzre/payment-system/services/auth/internal/domain"
 	"github.com/amirzre/payment-system/services/auth/internal/repository"
 	sharederrors "github.com/amirzre/payment-system/shared/errors"
+	"go.opentelemetry.io/otel"
 )
 
 // AuthService defines the interface for auth business logic.
@@ -28,6 +29,8 @@ func NewAuthService(repo repository.UserRepository, tokenService *domain.TokenSe
 
 // RegisterUser registers a new user and returns a token pair.
 func (s *authService) RegisterUser(ctx context.Context, email, password string) (*domain.TokenPair, error) {
+	ctx, operationSpan := otel.Tracer("payment-system/auth").Start(ctx, "auth.register")
+	defer operationSpan.End()
 	existing, err := s.repo.GetByEmail(ctx, email)
 	if err != nil {
 		return nil, sharederrors.Wrap(sharederrors.KindInternal, "checking existing user", err)
@@ -55,6 +58,8 @@ func (s *authService) RegisterUser(ctx context.Context, email, password string) 
 
 // Login authenticates a user and returns a token pair.
 func (s *authService) Login(ctx context.Context, email, password string) (*domain.TokenPair, error) {
+	ctx, operationSpan := otel.Tracer("payment-system/auth").Start(ctx, "auth.login")
+	defer operationSpan.End()
 	user, err := s.repo.GetByEmail(ctx, email)
 	if err != nil {
 		return nil, sharederrors.Wrap(sharederrors.KindInternal, "querying user", err)

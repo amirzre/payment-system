@@ -54,6 +54,11 @@ case "${1:-deploy}" in
         kube apply -f "$ROOT/deploy/k8s/secrets.yaml"
         keys
         kube apply -f "$ROOT/deploy/k8s/infrastructure/"
+        # Service manifests require the dedicated telemetry leaf credentials.
+        # Existing local trust roots/passwords are preserved by bootstrap.
+        kubectl --context "$KUBE_CONTEXT" apply -f "$ROOT/deploy/k8s/observability/namespace.yaml"
+        KUBE_CONTEXT="$KUBE_CONTEXT" "$ROOT/scripts/observability-bootstrap" \
+            --state-dir "${OBSERVABILITY_STATE_DIR:-$HOME/.local/state/payment-system-observability}" --apply
         for dependency in redis nats; do
             kube rollout status "statefulset/$dependency" --timeout=180s
         done

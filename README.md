@@ -170,50 +170,13 @@ sequenceDiagram
 
 ## Observability
 
-When something breaks — a payment fails, latency spikes, a service crashes — you need answers fast. The observability stack gives you **one place to search all logs** and **visual dashboards** for system health at a glance.
+The Kubernetes stack provides Prometheus metrics, Loki log queries, Tempo distributed traces, Alloy collection, and Grafana dashboards. Application telemetry uses separate mTLS identities for trace ingestion, metrics scraping, and backend queries. Grafana requires login and is accessed through a loopback-only HTTPS port-forward.
 
-### How It Works
+Runtime panels include goroutines, heap allocation and usage, garbage collection, resident memory, CPU cores, and file descriptors, grouped by service and pod. Request panels cover HTTP/gRPC latency and errors, retries, circuit breakers, cache behavior, and durable-event health. W3C trace context survives outbox storage and NATS delivery; logs link to the corresponding trace.
 
-```mermaid
-graph LR
-    subgraph Services["Your Services"]
-        direction LR
-        A1["account"]
-        A2["ledger"]
-        A3["payment"]
-        A4["auth"]
-        A5["api-gateway"]
-    end
+Use **PromQL** for metrics, **LogQL** for logs, and **TraceQL** for trace search. These are different query languages. No request bodies, authentication headers, raw SQL, or high-cardinality identity labels are collected.
 
-    PT["Promtail<br/><i>log shipper</i>"]
-    L["Loki<br/><i>log storage</i>"]
-    G["Grafana<br/><i>dashboards</i>"]
-
-    A1 -->|"stdout JSON"| PT
-    A2 -->|"stdout JSON"| PT
-    A3 -->|"stdout JSON"| PT
-    A4 -->|"stdout JSON"| PT
-    A5 -->|"stdout JSON"| PT
-
-    PT -->|"push via HTTP"| L
-    L -->|"LogQL queries"| G
-
-    style PT fill:#ff9800,color:#fff
-    style L fill:#4caf50,color:#fff
-    style G fill:#1565c0,color:#fff
-```
-
-No code changes were needed. Every service already writes structured JSON to stdout via Go's `slog`. Promtail picks them up from Docker automatically.
-
-### The Tools
-
-| Tool | Role | Why |
-|------|------|-----|
-| **Loki** | Stores and indexes logs | Indexes labels only (container name, level) — uses 10× less RAM than Elasticsearch |
-| **Promtail** | Ships logs to Loki | Native Docker integration — tails stdout, parses JSON fields (`level`, `service`, `method`, `duration`) |
-| **Grafana** | Single UI for everything | Same query language for logs (LogQL) and metrics (PromQL) — learn one, know both |
-
-**Quick start:** `docker compose up -d loki promtail grafana` → open `http://localhost:3000` (admin/admin)
+Follow [the secure deployment and walkthrough guide](docs/observability.md). The initial stack targets kind with bounded local storage and retention; it is not a highly available production installation. The deprecated Promtail/Docker Compose observability setup has been removed.
 
 
 ## Tech Stack
@@ -260,7 +223,7 @@ make build
 # Generate RSA keys for JWT
 ./deploy/generate-keys.sh
 
-# Start everything (Postgres ×4, Redis, NATS, 5 microservices, observability)
+# Start everything (Postgres ×4, Redis, NATS, 5 microservices)
 make docker-up
 
 # Verify
@@ -484,11 +447,11 @@ payment-system/
 ├── proto/                  # Protobuf contracts (buf-managed)
 ├── gen/go/                 # Generated gRPC/protobuf code
 ├── deploy/
-│   ├── k8s/                # Kubernetes manifests (Kustomize: base + overlays)
-│   └── observability/      # Loki, Promtail, Prometheus, Grafana configs
+│   └── k8s/                # Kubernetes infrastructure, migrations and services
+│       └── observability/  # Secure Prometheus, Loki, Tempo, Alloy, Grafana stack
 ├── docs/                   # ADRs, domain model, roadmap, observability guide
 ├── .github/workflows/      # Per-service path-filtered CI
-├── docker-compose.yml      # Full stack (services + infra + observability)
+├── docker-compose.yml      # Application services + infrastructure (observability runs on Kubernetes)
 └── Makefile                # Build, test, deploy, CI targets
 ```
 

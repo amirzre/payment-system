@@ -13,6 +13,7 @@ import (
 	"github.com/amirzre/payment-system/shared/middleware"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"go.opentelemetry.io/otel"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -41,7 +42,15 @@ type CreatePaymentInput struct {
 }
 
 func (s *paymentService) Create(ctx context.Context, input CreatePaymentInput) (*domain.PaymentIntent, error) {
-	p, err := domain.NewPaymentIntent(input.IdempotencyKey, input.SourceAccountID, input.DestinationAccountID, input.AmountMinor, input.Currency)
+	ctx, operationSpan := otel.Tracer("payment-system/payment").Start(ctx, "payment.create")
+	defer operationSpan.End()
+	p, err := domain.NewPaymentIntent(
+		input.IdempotencyKey,
+		input.SourceAccountID,
+		input.DestinationAccountID,
+		input.AmountMinor,
+		input.Currency,
+	)
 	if err != nil {
 		return nil, sharederrors.New(sharederrors.KindInvalidArgument, err.Error())
 	}
@@ -53,7 +62,10 @@ func (s *paymentService) Create(ctx context.Context, input CreatePaymentInput) (
 		return nil, sharederrors.Wrap(sharederrors.KindInternal, "creating payment intent", err)
 	}
 	if p.SourceAccountID != input.SourceAccountID || p.DestinationAccountID != input.DestinationAccountID || p.AmountMinor != input.AmountMinor || p.Currency != input.Currency {
-		return nil, sharederrors.New(sharederrors.KindAlreadyExists, "idempotency key already used with different payment parameters")
+		return nil, sharederrors.New(
+			sharederrors.KindAlreadyExists,
+			"idempotency key already used with different payment parameters",
+		)
 	}
 	var businessErr error
 	result, err := s.repo.Process(ctx, p.ID, func(tx pgx.Tx, current *domain.PaymentIntent) error {
@@ -73,7 +85,10 @@ func (s *paymentService) Create(ctx context.Context, input CreatePaymentInput) (
 			}
 			account := response.GetAccount()
 			if account == nil || account.GetStatus() != "active" || account.GetCurrency() != current.Currency {
-				businessErr = sharederrors.New(sharederrors.KindFailedPrecondition, "both accounts must be active and use the payment currency")
+				businessErr = sharederrors.New(
+					sharederrors.KindFailedPrecondition,
+					"both accounts must be active and use the payment currency",
+				)
 				_, err := tx.Exec(ctx, `UPDATE payment_intents SET status='failed',updated_at=now() WHERE id=$1`, current.ID)
 				current.Status = domain.StatusFailed
 				return err
@@ -103,8 +118,18 @@ func (s *paymentService) Create(ctx context.Context, input CreatePaymentInput) (
 		_, callErr := s.ledgerClient.PostEntries(callCtx, &ledgerv1.PostEntriesRequest{
 			TransactionId: current.TransactionID.String(),
 			Entries: []*ledgerv1.LedgerEntry{
-				{AccountId: current.SourceAccountID.String(), Direction: ledgerv1.LedgerDirection_LEDGER_DIRECTION_DEBIT, AmountMinor: current.AmountMinor, Currency: current.Currency},
-				{AccountId: current.DestinationAccountID.String(), Direction: ledgerv1.LedgerDirection_LEDGER_DIRECTION_CREDIT, AmountMinor: current.AmountMinor, Currency: current.Currency},
+				{
+					AccountId:   current.SourceAccountID.String(),
+					Direction:   ledgerv1.LedgerDirection_LEDGER_DIRECTION_DEBIT,
+					AmountMinor: current.AmountMinor,
+					Currency:    current.Currency,
+				},
+				{
+					AccountId:   current.DestinationAccountID.String(),
+					Direction:   ledgerv1.LedgerDirection_LEDGER_DIRECTION_CREDIT,
+					AmountMinor: current.AmountMinor,
+					Currency:    current.Currency,
+				},
 			},
 		})
 		if callErr != nil {
@@ -124,14 +149,21 @@ func (s *paymentService) Create(ctx context.Context, input CreatePaymentInput) (
 		if _, ok := status.FromError(err); ok {
 			return nil, err
 		}
-		return nil, sharederrors.Wrap(sharederrors.KindInternal, "processing payment; retry using the same idempotency key", err)
+		return nil, sharederrors.Wrap(
+			sharederrors.KindInternal,
+			"processing payment; retry using the same idempotency key",
+			err,
+		)
 	}
 	if businessErr != nil {
 		return nil, businessErr
 	}
 	return result, nil
 }
+
 func (s *paymentService) GetByID(ctx context.Context, id uuid.UUID) (*domain.PaymentIntent, error) {
+	ctx, operationSpan := otel.Tracer("payment-system/payment").Start(ctx, "payment.get")
+	defer operationSpan.End()
 	p, err := s.repo.GetByID(ctx, id)
 	if err != nil {
 		return nil, sharederrors.Wrap(sharederrors.KindInternal, "failed to get payment", err)

@@ -21,7 +21,9 @@ import (
 	"github.com/amirzre/payment-system/shared/eventbus"
 	"github.com/amirzre/payment-system/shared/healthcheck"
 	"github.com/amirzre/payment-system/shared/logger"
+	"github.com/amirzre/payment-system/shared/metrics"
 	"github.com/amirzre/payment-system/shared/middleware"
+	"github.com/amirzre/payment-system/shared/observability"
 	"github.com/amirzre/payment-system/shared/redisclient"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
@@ -38,9 +40,22 @@ func main() {
 	log := logger.New(cfg.Server.Environment, "payment-service")
 	log.Info("starting payment-service", slog.Int("port", cfg.Server.GRPCPort))
 
-	// Connect to Database
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+	telemetry, err := observability.Init(ctx, "payment-service")
+	if err != nil {
+		log.Error("invalid observability configuration", slog.Any("error", err))
+		os.Exit(1)
+	}
+	defer func() {
+		flushCtx, stop := context.WithTimeout(context.Background(), 5*time.Second)
+		defer stop()
+		if err := telemetry.Shutdown(flushCtx); err != nil {
+			log.Error("telemetry shutdown failed", slog.Any("error", err))
+		}
+	}()
+
+	// Connect to Database
 	pool, err := pgxpool.New(ctx, cfg.Database.DatabaseURL)
 	if err != nil {
 		log.Error("failed to create pgx pool", slog.Any("error", err))
@@ -53,6 +68,7 @@ func main() {
 		os.Exit(1)
 	}
 	log.Info("connected to database")
+	metrics.RegisterPoolStats("database", pool)
 
 	// Connect to Redis
 	var redisIdempotency *middleware.RedisIdempotency
@@ -88,25 +104,25 @@ func main() {
 	}
 
 	// gRPC clients with circuit breaker + retry
-	accountConn, _ := grpc.NewClient(cfg.Service.AccountGRPCAddr,
+	accountConn, _ := grpc.NewClient(cfg.Service.AccountGRPCAddr, append([]grpc.DialOption{
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 		grpc.WithDefaultCallOptions(grpc.WaitForReady(true)),
 		grpc.WithChainUnaryInterceptor(
 			middleware.UnaryClientCircuitBreaker(middleware.DefaultCircuitBreakerConfig()),
 			middleware.UnaryClientRetry(middleware.DefaultRetryConfig()),
 		),
-	)
+	}, observability.GRPCClientOptions()...)...)
 	defer accountConn.Close()
 	accountClient := accountv1.NewAccountServiceClient(accountConn)
 
-	ledgerConn, _ := grpc.NewClient(cfg.Service.LedgerGRPCAddr,
+	ledgerConn, _ := grpc.NewClient(cfg.Service.LedgerGRPCAddr, append([]grpc.DialOption{
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 		grpc.WithDefaultCallOptions(grpc.WaitForReady(true)),
 		grpc.WithChainUnaryInterceptor(
 			middleware.UnaryClientCircuitBreaker(middleware.DefaultCircuitBreakerConfig()),
 			middleware.UnaryClientRetry(middleware.DefaultRetryConfig()),
 		),
-	)
+	}, observability.GRPCClientOptions()...)...)
 	defer ledgerConn.Close()
 	ledgerClient := ledgerv1.NewLedgerServiceClient(ledgerConn)
 
@@ -129,7 +145,7 @@ func main() {
 	}
 
 	// Set up gRPC server
-	grpcServer := grpc.NewServer(middleware.UnaryServerChain(log))
+	grpcServer := grpc.NewServer(observability.GRPCServerOption(), middleware.UnaryServerChain(log))
 	paymentv1.RegisterPaymentServiceServer(grpcServer, paymentgrpc.NewPaymentServer(paymentSrv))
 	healthServer := healthcheck.RegisterGRPC(grpcServer)
 	reflection.Register(grpcServer)
@@ -141,15 +157,27 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Graceful shutdown
+	// Drain requests before flushing telemetry. Never let a long-lived RPC
+	// consume the entire Kubernetes termination grace period.
+	shutdownDone := make(chan struct{})
 	go func() {
+		defer close(shutdownDone)
 		sigCh := make(chan os.Signal, 1)
 		signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 		sig := <-sigCh
 		log.Info("received signal, shutting down", slog.String("signal", sig.String()))
 		cancel()
 		healthServer.Shutdown()
-		grpcServer.GracefulStop()
+		drained := make(chan struct{})
+		go func() { grpcServer.GracefulStop(); close(drained) }()
+		timer := time.NewTimer(20 * time.Second)
+		defer timer.Stop()
+		select {
+		case <-drained:
+		case <-timer.C:
+			grpcServer.Stop()
+			<-drained
+		}
 	}()
 
 	log.Info("gRPC server listening", slog.Int("port", cfg.Server.GRPCPort))
@@ -157,4 +185,5 @@ func main() {
 		log.Error("gRPC server failed", slog.Any("error", err))
 		os.Exit(1)
 	}
+	<-shutdownDone
 }

@@ -48,7 +48,7 @@ func testDatabase(t *testing.T) *pgxpool.Pool {
 			t.Error(err)
 		}
 	})
-	_, err = db.Exec(ctx, `CREATE TABLE outbox (id bigserial PRIMARY KEY, subject text NOT NULL, key text NOT NULL, payload text NOT NULL, published boolean NOT NULL DEFAULT false, created_at timestamptz DEFAULT now(), published_at timestamptz);
+	_, err = db.Exec(ctx, `CREATE TABLE outbox (id bigserial PRIMARY KEY, subject text NOT NULL, key text NOT NULL, payload text NOT NULL, published boolean NOT NULL DEFAULT false, created_at timestamptz DEFAULT now(), published_at timestamptz, trace_context jsonb NOT NULL DEFAULT '{}');
 	CREATE TABLE processed_events (consumer_name text NOT NULL, event_key text NOT NULL, PRIMARY KEY (consumer_name, event_key));
 	CREATE TABLE effects (event_key text PRIMARY KEY, value integer NOT NULL)`)
 	if err != nil {
@@ -62,11 +62,17 @@ type publisherFunc func(context.Context, string, string, any) error
 func (f publisherFunc) Publish(ctx context.Context, subject, key string, payload any) error {
 	return f(ctx, subject, key, payload)
 }
+
 func testLogger() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard, nil)) }
 
 func seedOutbox(t *testing.T, db *pgxpool.Pool, key, payload string) {
 	t.Helper()
-	if _, err := db.Exec(context.Background(), `INSERT INTO outbox(subject,key,payload) VALUES('test.event',$1,$2)`, key, payload); err != nil {
+	if _, err := db.Exec(
+		context.Background(),
+		`INSERT INTO outbox(subject,key,payload) VALUES('test.event',$1,$2)`,
+		key,
+		payload,
+	); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -118,7 +124,12 @@ func TestConcurrentOutboxPollersDoNotPublishLockedRows(t *testing.T) {
 func TestOutboxFailureRemainsRetryable(t *testing.T) {
 	db := testDatabase(t)
 	seedOutbox(t, db, "retry", `{"ok":true}`)
-	publishOutbox(context.Background(), db, publisherFunc(func(context.Context, string, string, any) error { return errors.New("offline") }), testLogger())
+	publishOutbox(
+		context.Background(),
+		db,
+		publisherFunc(func(context.Context, string, string, any) error { return errors.New("offline") }),
+		testLogger(),
+	)
 	var published bool
 	if err := db.QueryRow(context.Background(), `SELECT published FROM outbox`).Scan(&published); err != nil {
 		t.Fatal(err)
@@ -126,7 +137,12 @@ func TestOutboxFailureRemainsRetryable(t *testing.T) {
 	if published {
 		t.Fatal("failed publish was marked published")
 	}
-	publishOutbox(context.Background(), db, publisherFunc(func(context.Context, string, string, any) error { return nil }), testLogger())
+	publishOutbox(
+		context.Background(),
+		db,
+		publisherFunc(func(context.Context, string, string, any) error { return nil }),
+		testLogger(),
+	)
 	if err := db.QueryRow(context.Background(), `SELECT published FROM outbox`).Scan(&published); err != nil {
 		t.Fatal(err)
 	}
@@ -141,7 +157,11 @@ func TestIdempotencyRejectsEmptyKey(t *testing.T) {
 			t.Error("empty event key accessed database before validation")
 		}
 	}()
-	h := WithIdempotency(nil, "consumer", func(context.Context, string, []byte) error { t.Fatal("empty key reached handler"); return nil })
+	h := WithIdempotency(
+		nil,
+		"consumer",
+		func(context.Context, string, []byte) error { t.Fatal("empty key reached handler"); return nil },
+	)
 	if err := h(context.Background(), "", nil); err == nil {
 		t.Fatal("accepted empty event key")
 	}
@@ -167,7 +187,10 @@ func TestIdempotencySerializesDuplicateDeliveries(t *testing.T) {
 	deadline := time.Now().Add(3 * time.Second)
 	for {
 		var waiting bool
-		err := db.QueryRow(context.Background(), `SELECT EXISTS (SELECT 1 FROM pg_stat_activity WHERE wait_event_type = 'Lock' AND query LIKE '%INSERT INTO processed_events%')`).Scan(&waiting)
+		err := db.QueryRow(
+			context.Background(),
+			`SELECT EXISTS (SELECT 1 FROM pg_stat_activity WHERE wait_event_type = 'Lock' AND query LIKE '%INSERT INTO processed_events%')`,
+		).Scan(&waiting)
 		if err != nil {
 			close(release)
 			t.Fatal(err)
