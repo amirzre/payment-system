@@ -1,0 +1,63 @@
+apiVersion: 1
+datasources:
+  - name: Prometheus
+    uid: prometheus
+    type: prometheus
+    access: proxy
+    url: https://prometheus.observability.svc.cluster.local:9090
+    isDefault: true
+    editable: false
+    jsonData:
+      httpMethod: POST
+      timeInterval: 15s
+      tlsAuth: true
+      tlsAuthWithCACert: true
+      serverName: prometheus.observability.svc.cluster.local
+    secureJsonData:
+      tlsCACert: $BACKEND_CA
+      tlsClientCert: $BACKEND_CLIENT_CERT
+      tlsClientKey: $BACKEND_CLIENT_KEY
+  - name: Loki
+    uid: loki
+    type: loki
+    access: proxy
+    url: https://loki.observability.svc.cluster.local:3100
+    editable: false
+    jsonData:
+      maxLines: 1000
+      tlsAuth: true
+      tlsAuthWithCACert: true
+      serverName: loki.observability.svc.cluster.local
+      derivedFields:
+        - name: TraceID
+          matcherRegex: '"trace_id":"([a-f0-9]{32})"'
+          datasourceUid: tempo
+          url: '$${__value.raw}'
+          urlDisplayLabel: View trace
+    secureJsonData:
+      tlsCACert: $BACKEND_CA
+      tlsClientCert: $BACKEND_CLIENT_CERT
+      tlsClientKey: $BACKEND_CLIENT_KEY
+  - name: Tempo
+    uid: tempo
+    type: tempo
+    access: proxy
+    url: https://tempo.observability.svc.cluster.local:3200
+    editable: false
+    jsonData:
+      tlsAuth: true
+      tlsAuthWithCACert: true
+      serverName: tempo.observability.svc.cluster.local
+      tracesToLogsV2:
+        datasourceUid: loki
+        spanStartTimeShift: '-1m'
+        spanEndTimeShift: '1m'
+        filterByTraceID: true
+        filterBySpanID: false
+        tags: [{key: service.name, value: service}]
+        customQuery: true
+        query: '{$${__tags}} | json | trace_id = "$${__trace.traceId}"'
+    secureJsonData:
+      tlsCACert: $BACKEND_CA
+      tlsClientCert: $BACKEND_CLIENT_CERT
+      tlsClientKey: $BACKEND_CLIENT_KEY
