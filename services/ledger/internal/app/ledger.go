@@ -2,12 +2,14 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/amirzre/payment-system/services/ledger/internal/domain"
 	"github.com/amirzre/payment-system/services/ledger/internal/repository"
 	sharederrors "github.com/amirzre/payment-system/shared/errors"
 	"github.com/google/uuid"
+	"go.opentelemetry.io/otel"
 )
 
 // LedgerEntryService defines the interface for ledger business logic.
@@ -45,6 +47,8 @@ type DepositInput struct {
 
 // PostEntries validates the double-entry invariant and persists the entries.
 func (s *ledgerService) PostEntries(ctx context.Context, input PostEntriesInput) error {
+	ctx, operationSpan := otel.Tracer("payment-system/ledger").Start(ctx, "ledger.post")
+	defer operationSpan.End()
 	debit, credit, err := domain.NewLedgerEntryPair(
 		input.TransactionID,
 		input.SourceAccountID,
@@ -58,6 +62,12 @@ func (s *ledgerService) PostEntries(ctx context.Context, input PostEntriesInput)
 
 	entries := []domain.LedgerEntry{debit, credit}
 	if err := s.repo.PostEntries(ctx, input.TransactionID, entries); err != nil {
+		if errors.Is(err, domain.ErrInsufficientFunds) || errors.Is(err, domain.ErrCurrencyMismatch) {
+			return sharederrors.Wrap(sharederrors.KindFailedPrecondition, err.Error(), err)
+		}
+		if errors.Is(err, domain.ErrTransactionConflict) {
+			return sharederrors.Wrap(sharederrors.KindAlreadyExists, err.Error(), err)
+		}
 		return sharederrors.Wrap(sharederrors.KindInternal, "failed to post entries", err)
 	}
 
@@ -66,6 +76,8 @@ func (s *ledgerService) PostEntries(ctx context.Context, input PostEntriesInput)
 
 // GetBalance retrieves the balance for the given account.
 func (s *ledgerService) GetBalance(ctx context.Context, accountID uuid.UUID) (int64, error) {
+	ctx, operationSpan := otel.Tracer("payment-system/ledger").Start(ctx, "ledger.balance")
+	defer operationSpan.End()
 	balance, err := s.repo.GetBalance(ctx, accountID)
 	if err != nil {
 		return 0, sharederrors.Wrap(sharederrors.KindInternal,
@@ -77,6 +89,8 @@ func (s *ledgerService) GetBalance(ctx context.Context, accountID uuid.UUID) (in
 
 // Deposit posts a single credit entry for the given account and returns the new balance.
 func (s *ledgerService) Deposit(ctx context.Context, input DepositInput) (int64, error) {
+	ctx, operationSpan := otel.Tracer("payment-system/ledger").Start(ctx, "ledger.deposit")
+	defer operationSpan.End()
 	if input.AmountMinor <= 0 {
 		return 0, sharederrors.New(sharederrors.KindInvalidArgument,
 			fmt.Sprintf("amount must be positive, got %d", input.AmountMinor))

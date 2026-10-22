@@ -80,7 +80,7 @@ func (h *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
 }
 
 // AuthMiddleware returns an HTTP middleware that verifies the Authorization header
-// by calling auth-service.VerifyToken. 
+// by calling auth-service.VerifyToken.
 func AuthMiddleware(authClient authv1.AuthServiceClient) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

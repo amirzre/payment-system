@@ -1,0 +1,146 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: ledger
+  namespace: payment-system
+automountServiceAccountToken: false
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ledger-config
+  namespace: payment-system
+data:
+  SERVER_ENVIRONMENT: production
+  SERVER_PORT: '50052'
+  METRICS_ADDR: :9090
+  METRICS_TLS_CERT_FILE: /etc/observability/tls/metrics-server.crt
+  METRICS_TLS_KEY_FILE: /etc/observability/tls/metrics-server.key
+  METRICS_CLIENT_CA_FILE: /etc/observability/tls/metrics-client-ca.crt
+  OTEL_EXPORTER_OTLP_ENDPOINT: https://alloy.observability.svc.cluster.local:4317
+  OTEL_EXPORTER_OTLP_CERTIFICATE: /etc/observability/tls/otlp-ca.crt
+  OTEL_EXPORTER_OTLP_CLIENT_CERTIFICATE: /etc/observability/tls/otlp-client.crt
+  OTEL_EXPORTER_OTLP_CLIENT_KEY: /etc/observability/tls/otlp-client.key
+  OTEL_EXPORTER_OTLP_PROTOCOL: grpc
+  OTEL_TRACES_SAMPLER: always_on
+  APP_ENV: kind
+  SERVICE_VERSION: observability-2026-10-20
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ledger
+  namespace: payment-system
+  labels:
+    app.kubernetes.io/name: ledger
+    app.kubernetes.io/component: service
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: ledger
+  ports:
+  - name: grpc
+    port: 50052
+    targetPort: grpc
+    protocol: TCP
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ledger
+  namespace: payment-system
+  labels:
+    app.kubernetes.io/name: ledger
+    app.kubernetes.io/component: service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: ledger
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: ledger
+        app.kubernetes.io/component: service
+        observability.payment-system/enabled: 'true'
+        observability.payment-system/service: ledger-service
+    spec:
+      serviceAccountName: ledger
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+        fsGroup: 1000
+      containers:
+      - name: ledger
+        image: payment-system-ledger:latest
+        imagePullPolicy: IfNotPresent
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
+        envFrom:
+        - configMapRef:
+            name: ledger-config
+        env:
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: ledger-postgres-credentials
+              key: DATABASE_URL
+        - name: NATS_ADDR
+          valueFrom:
+            secretKeyRef:
+              name: nats-credentials
+              key: NATS_URL
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: POD_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        ports:
+        - name: grpc
+          containerPort: 50052
+          protocol: TCP
+        - name: metrics
+          containerPort: 9090
+          protocol: TCP
+        readinessProbe:
+          grpc:
+            port: 50052
+          initialDelaySeconds: 5
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        livenessProbe:
+          grpc:
+            port: 50052
+          initialDelaySeconds: 15
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+        volumeMounts:
+        - name: observability-tls
+          mountPath: /etc/observability/tls
+          readOnly: true
+      volumes:
+      - name: observability-tls
+        secret:
+          secretName: observability-app-tls
+          defaultMode: 288

@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+cd "$(dirname "$0")/.."
+source deploy/k8s/observability/images.lock
+
+# Changing an upstream input or the probe source produces a new image tag.
+fingerprint=$(
+  cat deploy/k8s/observability/images.lock \
+    deploy/k8s/observability/images/Dockerfile \
+    scripts/observability-probe.go |
+    sha256sum | cut -c1-16
+)
+mkdir -p /tmp/payment-system-observability
+
+for component in prometheus loki tempo alloy grafana; do
+  image_variable="${component^^}_IMAGE"
+  image="payment-system-observability-${component}:${fingerprint}"
+
+  docker build --platform linux/amd64 \
+    --build-arg GO_IMAGE="$GO_IMAGE" \
+    --build-arg BASE_IMAGE="${!image_variable}" \
+    -f deploy/k8s/observability/images/Dockerfile \
+    -t "$image" .
+
+  if [[ ${1:-} == --load-kind ]]; then
+    archive="/tmp/payment-system-observability/${component}-${fingerprint}.tar"
+    docker image save --platform linux/amd64 -o "$archive" "$image"
+    kind load image-archive --name "${KIND_CLUSTER_NAME:-payment-system}" "$archive"
+  fi
+done
+
+printf 'Built observability image fingerprint %s\n' "$fingerprint"

@@ -1,0 +1,66 @@
+# Pinned 2.10 supported maintenance line: 3.x changes the storage architecture.
+multitenancy_enabled: false
+usage_report:
+  reporting_enabled: false
+server:
+  http_listen_port: 3200
+  grpc_listen_address: 127.0.0.1
+  grpc_listen_port: 9095
+  http_tls_config:
+    cert_file: /etc/observability/tls/server.crt
+    key_file: /etc/observability/tls/server.key
+    client_auth_type: RequireAndVerifyClientCert
+    client_ca_file: /etc/observability/tls/backend-ca.crt
+  log_level: warn
+memberlist:
+  bind_addr: [127.0.0.1]
+  advertise_addr: 127.0.0.1
+distributor:
+  receivers:
+    otlp:
+      protocols:
+        grpc:
+          endpoint: 0.0.0.0:4317
+          tls:
+            cert_file: /etc/observability/tls/server.crt
+            key_file: /etc/observability/tls/server.key
+            client_ca_file: /etc/observability/tls/backend-ca.crt
+            min_version: '1.2'
+ingester:
+  lifecycler:
+    address: 127.0.0.1
+  max_block_duration: 5m
+  max_block_bytes: 16777216
+  trace_idle_period: 10s
+compactor:
+  compaction:
+    block_retention: 72h
+    compaction_window: 1h
+    max_compaction_objects: 100000
+    max_block_bytes: 67108864
+storage:
+  trace:
+    backend: local
+    pool:
+      max_workers: 20
+      queue_depth: 100
+    wal:
+      path: /data/wal
+    local:
+      path: /data/blocks
+querier:
+  max_concurrent_queries: 2
+query_frontend:
+  max_outstanding_per_tenant: 16
+  trace_by_id:
+    query_shards: 4
+overrides:
+  defaults:
+    ingestion:
+      rate_limit_bytes: 262144
+      burst_size_bytes: 1048576
+      max_traces_per_user: 10000
+    global:
+      max_bytes_per_trace: 1048576
+    read:
+      max_search_duration: 72h

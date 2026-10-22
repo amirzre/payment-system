@@ -61,6 +61,9 @@ func Is(err error, kind Kind) bool {
 func ToGRPCStatus(err error) error {
 	var e *Error
 	if !errors.As(err, &e) {
+		if _, ok := status.FromError(err); ok {
+			return err
+		}
 		return status.Error(codes.Internal, "internal error")
 	}
 

@@ -3,7 +3,6 @@ package app
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"time"
 
 	accountv1 "github.com/amirzre/payment-system/gen/go/account/v1"
@@ -13,15 +12,16 @@ import (
 	sharederrors "github.com/amirzre/payment-system/shared/errors"
 	"github.com/amirzre/payment-system/shared/middleware"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+	"go.opentelemetry.io/otel"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
-// PaymentService defines the interface for payment business logic.
 type PaymentService interface {
-	Create(ctx context.Context, input CreatePaymentInput) (*domain.PaymentIntent, error)
-	GetByID(ctx context.Context, id uuid.UUID) (*domain.PaymentIntent, error)
+	Create(context.Context, CreatePaymentInput) (*domain.PaymentIntent, error)
+	GetByID(context.Context, uuid.UUID) (*domain.PaymentIntent, error)
 }
-
-// paymentService implements PaymentService interface.
 type paymentService struct {
 	repo          repository.PaymentRepository
 	accountClient accountv1.AccountServiceClient
@@ -29,22 +29,10 @@ type paymentService struct {
 	idempotency   *middleware.RedisIdempotency
 }
 
-// NewPaymentService creates a new payment service instance.
-func NewPaymentService(
-	repo repository.PaymentRepository,
-	accountClient accountv1.AccountServiceClient,
-	ledgerClient ledgerv1.LedgerServiceClient,
-	idempotency *middleware.RedisIdempotency,
-) PaymentService {
-	return &paymentService{
-		repo:          repo,
-		accountClient: accountClient,
-		ledgerClient:  ledgerClient,
-		idempotency:   idempotency,
-	}
+func NewPaymentService(repo repository.PaymentRepository, account accountv1.AccountServiceClient, ledger ledgerv1.LedgerServiceClient, idempotency *middleware.RedisIdempotency) PaymentService {
+	return &paymentService{repo, account, ledger, idempotency}
 }
 
-// CreatePaymentInput holds the data needed to create a payment.
 type CreatePaymentInput struct {
 	IdempotencyKey       string
 	SourceAccountID      uuid.UUID
@@ -53,34 +41,10 @@ type CreatePaymentInput struct {
 	Currency             string
 }
 
-// Create orchestrates the synchronous payment flow.
 func (s *paymentService) Create(ctx context.Context, input CreatePaymentInput) (*domain.PaymentIntent, error) {
-	if s.idempotency != nil {
-		isNew, redisErr := s.idempotency.CheckAndSet(ctx, input.IdempotencyKey)
-		if redisErr != nil {
-			var logger *slog.Logger
-			_ = logger
-		}
-		if !isNew {
-			existing, err := s.repo.GetByIdempotencyKey(ctx, input.IdempotencyKey)
-			if err != nil {
-				return nil, sharederrors.Wrap(sharederrors.KindInternal, "checking idempotency after redis hit", err)
-			}
-			if existing != nil {
-				return existing, nil
-			}
-		}
-	}
-
-	existing, err := s.repo.GetByIdempotencyKey(ctx, input.IdempotencyKey)
-	if err != nil {
-		return nil, sharederrors.Wrap(sharederrors.KindInternal, "checking idempotency", err)
-	}
-	if existing != nil {
-		return existing, nil
-	}
-
-	intent, err := domain.NewPaymentIntent(
+	ctx, operationSpan := otel.Tracer("payment-system/payment").Start(ctx, "payment.create")
+	defer operationSpan.End()
+	p, err := domain.NewPaymentIntent(
 		input.IdempotencyKey,
 		input.SourceAccountID,
 		input.DestinationAccountID,
@@ -90,91 +54,122 @@ func (s *paymentService) Create(ctx context.Context, input CreatePaymentInput) (
 	if err != nil {
 		return nil, sharederrors.New(sharederrors.KindInvalidArgument, err.Error())
 	}
-
-	if err := s.repo.Create(ctx, intent); err != nil {
+	// Redis is advisory only. PostgreSQL serializes creation and processing.
+	if s.idempotency != nil {
+		_, _ = s.idempotency.CheckAndSet(ctx, input.IdempotencyKey)
+	}
+	if err := s.repo.Create(ctx, p); err != nil {
 		return nil, sharederrors.Wrap(sharederrors.KindInternal, "creating payment intent", err)
 	}
-
-	balanceCtx, balanceCancel := context.WithTimeout(ctx, 2*time.Second)
-	defer balanceCancel()
-
-	balanceResp, err := s.accountClient.GetBalance(balanceCtx, &accountv1.GetBalanceRequest{
-		AccountId: input.SourceAccountID.String(),
+	if p.SourceAccountID != input.SourceAccountID || p.DestinationAccountID != input.DestinationAccountID || p.AmountMinor != input.AmountMinor || p.Currency != input.Currency {
+		return nil, sharederrors.New(
+			sharederrors.KindAlreadyExists,
+			"idempotency key already used with different payment parameters",
+		)
+	}
+	var businessErr error
+	result, err := s.repo.Process(ctx, p.ID, func(tx pgx.Tx, current *domain.PaymentIntent) error {
+		if current.IsTerminal() || current.Status == domain.StatusPosting {
+			return nil
+		}
+		if current.Status != domain.StatusCreated {
+			// A legacy attempt with a known transaction ID can safely replay it.
+			return nil
+		}
+		for _, id := range []uuid.UUID{current.SourceAccountID, current.DestinationAccountID} {
+			callCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+			response, callErr := s.accountClient.GetAccount(callCtx, &accountv1.GetAccountRequest{Id: id.String()})
+			cancel()
+			if callErr != nil {
+				return callErr
+			}
+			account := response.GetAccount()
+			if account == nil || account.GetStatus() != "active" || account.GetCurrency() != current.Currency {
+				businessErr = sharederrors.New(
+					sharederrors.KindFailedPrecondition,
+					"both accounts must be active and use the payment currency",
+				)
+				_, err := tx.Exec(ctx, `UPDATE payment_intents SET status='failed',updated_at=now() WHERE id=$1`, current.ID)
+				current.Status = domain.StatusFailed
+				return err
+			}
+		}
+		// Commit validation before any remote write. A retry after a lost ledger
+		// reply must replay that write, even if account metadata has since changed.
+		_, err := tx.Exec(ctx, `UPDATE payment_intents SET status='posting',updated_at=now() WHERE id=$1`, current.ID)
+		current.Status = domain.StatusPosting
+		return err
 	})
 	if err != nil {
-		s.repo.UpdateStatus(ctx, intent.ID, domain.StatusFailed)
-		return nil, sharederrors.Wrap(sharederrors.KindFailedPrecondition,
-			fmt.Sprintf("checking balance for account %s", input.SourceAccountID), err)
+		return nil, err
 	}
-
-	if balanceResp.GetBalanceMinor() < input.AmountMinor {
-		s.repo.UpdateStatus(ctx, intent.ID, domain.StatusFailed)
-		return nil, sharederrors.New(sharederrors.KindFailedPrecondition,
-			fmt.Sprintf("insufficient funds: available %d, required %d",
-				balanceResp.GetBalanceMinor(), input.AmountMinor))
+	if businessErr != nil {
+		return nil, businessErr
 	}
-
-	if err := intent.Transition(domain.StatusFundsReserved); err != nil {
-		return nil, sharederrors.Wrap(sharederrors.KindInternal, "state transition", err)
+	if result.IsTerminal() {
+		return result, nil
 	}
-	if err := s.repo.UpdateStatus(ctx, intent.ID, intent.Status); err != nil {
-		return nil, sharederrors.Wrap(sharederrors.KindInternal, "updating status to funds_reserved", err)
-	}
-
-	ledgerCtx, ledgerCancel := context.WithTimeout(ctx, 2*time.Second)
-	defer ledgerCancel()
-
-	txID := uuid.New()
-	_, err = s.ledgerClient.PostEntries(ledgerCtx, &ledgerv1.PostEntriesRequest{
-		TransactionId: txID.String(),
-		Entries: []*ledgerv1.LedgerEntry{
-			{
-				AccountId:   input.SourceAccountID.String(),
-				Direction:   ledgerv1.LedgerDirection_LEDGER_DIRECTION_DEBIT,
-				AmountMinor: input.AmountMinor,
-				Currency:    input.Currency,
+	result, err = s.repo.Process(ctx, p.ID, func(tx pgx.Tx, current *domain.PaymentIntent) error {
+		if current.IsTerminal() {
+			return nil
+		}
+		callCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+		defer cancel()
+		_, callErr := s.ledgerClient.PostEntries(callCtx, &ledgerv1.PostEntriesRequest{
+			TransactionId: current.TransactionID.String(),
+			Entries: []*ledgerv1.LedgerEntry{
+				{
+					AccountId:   current.SourceAccountID.String(),
+					Direction:   ledgerv1.LedgerDirection_LEDGER_DIRECTION_DEBIT,
+					AmountMinor: current.AmountMinor,
+					Currency:    current.Currency,
+				},
+				{
+					AccountId:   current.DestinationAccountID.String(),
+					Direction:   ledgerv1.LedgerDirection_LEDGER_DIRECTION_CREDIT,
+					AmountMinor: current.AmountMinor,
+					Currency:    current.Currency,
+				},
 			},
-			{
-				AccountId:   input.DestinationAccountID.String(),
-				Direction:   ledgerv1.LedgerDirection_LEDGER_DIRECTION_CREDIT,
-				AmountMinor: input.AmountMinor,
-				Currency:    input.Currency,
-			},
-		},
+		})
+		if callErr != nil {
+			// A timeout/unavailable response says nothing about whether ledger
+			// committed. Leave the payment retryable and reconcile via its event.
+			if status.Code(callErr) == codes.FailedPrecondition || status.Code(callErr) == codes.InvalidArgument {
+				businessErr = sharederrors.New(sharederrors.KindFailedPrecondition, status.Convert(callErr).Message())
+				_, err := tx.Exec(ctx, `UPDATE payment_intents SET status='failed',updated_at=now() WHERE id=$1`, current.ID)
+				current.Status = domain.StatusFailed
+				return err
+			}
+			return callErr
+		}
+		return s.repo.Complete(ctx, tx, current)
 	})
 	if err != nil {
-		s.repo.UpdateStatus(ctx, intent.ID, domain.StatusPaymentFailed)
-		return nil, sharederrors.Wrap(sharederrors.KindInternal, "posting ledger entries", err)
+		if _, ok := status.FromError(err); ok {
+			return nil, err
+		}
+		return nil, sharederrors.Wrap(
+			sharederrors.KindInternal,
+			"processing payment; retry using the same idempotency key",
+			err,
+		)
 	}
-
-	intent.SetTransactionID(txID)
-
-	if err := intent.Transition(domain.StatusLedgerPosted); err != nil {
-		return nil, sharederrors.Wrap(sharederrors.KindInternal, "state transition", err)
+	if businessErr != nil {
+		return nil, businessErr
 	}
-	if err := s.repo.UpdateStatus(ctx, intent.ID, intent.Status); err != nil {
-		return nil, sharederrors.Wrap(sharederrors.KindInternal, "updating status to ledger_posted", err)
-	}
-
-	if err := intent.Transition(domain.StatusCompleted); err != nil {
-		return nil, sharederrors.Wrap(sharederrors.KindInternal, "state transition", err)
-	}
-	if err := s.repo.UpdateStatus(ctx, intent.ID, intent.Status); err != nil {
-		return nil, sharederrors.Wrap(sharederrors.KindInternal, "updating status to completed", err)
-	}
-
-	return intent, nil
+	return result, nil
 }
 
-// GetByID retrieves a payment by its ID.
 func (s *paymentService) GetByID(ctx context.Context, id uuid.UUID) (*domain.PaymentIntent, error) {
-	intent, err := s.repo.GetByID(ctx, id)
+	ctx, operationSpan := otel.Tracer("payment-system/payment").Start(ctx, "payment.get")
+	defer operationSpan.End()
+	p, err := s.repo.GetByID(ctx, id)
 	if err != nil {
 		return nil, sharederrors.Wrap(sharederrors.KindInternal, "failed to get payment", err)
 	}
-	if intent == nil {
+	if p == nil {
 		return nil, sharederrors.New(sharederrors.KindNotFound, fmt.Sprintf("payment %s not found", id))
 	}
-
-	return intent, nil
+	return p, nil
 }

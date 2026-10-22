@@ -6,115 +6,186 @@ import (
 	"sort"
 
 	"github.com/amirzre/payment-system/services/ledger/internal/domain"
+	"github.com/amirzre/payment-system/shared/eventbus"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// LedgerRepository defines the persistence interface for ledger entries.
 type LedgerRepository interface {
-	PostEntries(ctx context.Context, txID uuid.UUID, entries []domain.LedgerEntry) error
-	GetBalance(ctx context.Context, accountID uuid.UUID) (int64, error)
-	Deposit(ctx context.Context, accountID uuid.UUID, amount int64, currency string) error
+	PostEntries(context.Context, uuid.UUID, []domain.LedgerEntry) error
+	GetBalance(context.Context, uuid.UUID) (int64, error)
+	Deposit(context.Context, uuid.UUID, int64, string) error
 }
 
-// ledgerRepository implements the ledger repository using Postgres.
-type ledgerRepository struct {
-	pool *pgxpool.Pool
+type ledgerRepository struct{ pool *pgxpool.Pool }
+
+func NewLedgerRepository(pool *pgxpool.Pool) LedgerRepository { return &ledgerRepository{pool: pool} }
+
+// Ledger notifications describe committed facts, not requests to move money.
+type ledgerPostedEvent struct {
+	TransactionID        string `json:"transaction_id"`
+	SourceAccountID      string `json:"source_account_id,omitempty"`
+	DestinationAccountID string `json:"destination_account_id"`
+	AmountMinor          int64  `json:"amount_minor"`
+	Currency             string `json:"currency"`
 }
 
-// NewLedgerRepository creates a new LedgerRepository.
-func NewLedgerRepository(pool *pgxpool.Pool) LedgerRepository {
-	return &ledgerRepository{pool: pool}
-}
+const balanceSQL = `SELECT COALESCE(SUM(CASE WHEN direction='credit' THEN amount_minor ELSE -amount_minor END),0) FROM ledger_entries WHERE account_id=$1`
 
-// PostEntries inserts a set of ledger entries atomically.
 func (r *ledgerRepository) PostEntries(ctx context.Context, txID uuid.UUID, entries []domain.LedgerEntry) error {
-	if len(entries) == 0 {
-		return fmt.Errorf("no entries to post")
+	if txID == uuid.Nil || len(entries) != 2 {
+		return domain.ErrDoubleEntryViolation
 	}
-
-	accountIDs := collectAccountIDs(entries)
-	sort.Slice(accountIDs, func(i, j int) bool {
-		return accountIDs[i].String() < accountIDs[j].String()
-	})
-
+	var debit, credit *domain.LedgerEntry
+	for i := range entries {
+		e := &entries[i]
+		if e.TransactionID != txID || e.AccountID == uuid.Nil || e.AmountMinor <= 0 || len(e.Currency) != 3 {
+			return domain.ErrDoubleEntryViolation
+		}
+		switch e.Direction {
+		case domain.DirectionDebit:
+			if debit != nil {
+				return domain.ErrDoubleEntryViolation
+			}
+			debit = e
+		case domain.DirectionCredit:
+			if credit != nil {
+				return domain.ErrDoubleEntryViolation
+			}
+			credit = e
+		default:
+			return domain.ErrDoubleEntryViolation
+		}
+	}
+	if debit == nil || credit == nil || debit.AccountID == credit.AccountID || debit.AmountMinor != credit.AmountMinor || debit.Currency != credit.Currency {
+		return domain.ErrDoubleEntryViolation
+	}
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
-		return fmt.Errorf("beginning transaction: %w", err)
+		return fmt.Errorf("beginning ledger transaction: %w", err)
 	}
-	defer tx.Rollback(ctx)
-
-	for _, accountID := range accountIDs {
-		_, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock(hashtext($1::text))", accountID.String())
-		if err != nil {
-			return fmt.Errorf("acquiring advisory lock for account %s: %w", accountID, err)
+	defer tx.Rollback(context.Background())
+	// Serialize a transaction ID before checking for a previous successful call.
+	if err := lock(ctx, tx, "ledger:tx:"+txID.String()); err != nil {
+		return err
+	}
+	rows, err := tx.Query(ctx, `SELECT account_id,direction,amount_minor,currency FROM ledger_entries WHERE transaction_id=$1`, txID)
+	if err != nil {
+		return err
+	}
+	var existing []domain.LedgerEntry
+	for rows.Next() {
+		var e domain.LedgerEntry
+		if err := rows.Scan(&e.AccountID, &e.Direction, &e.AmountMinor, &e.Currency); err != nil {
+			rows.Close()
+			return err
+		}
+		existing = append(existing, e)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if len(existing) > 0 {
+		if len(existing) != 2 {
+			return domain.ErrTransactionConflict
+		}
+		for _, old := range existing {
+			match := false
+			for _, e := range entries {
+				if old.AccountID == e.AccountID && old.Direction == e.Direction && old.AmountMinor == e.AmountMinor && old.Currency == e.Currency {
+					match = true
+				}
+			}
+			if !match {
+				return domain.ErrTransactionConflict
+			}
+		}
+		return nil // Existing committed transaction: no entries or events added.
+	}
+	ids := collectAccountIDs(entries)
+	sort.Slice(ids, func(i, j int) bool { return ids[i].String() < ids[j].String() })
+	for _, id := range ids {
+		if err := lock(ctx, tx, "ledger:account:"+id.String()); err != nil {
+			return err
+		}
+		if err := checkCurrency(ctx, tx, id, debit.Currency); err != nil {
+			return err
 		}
 	}
-
-	query := `
-		INSERT INTO ledger_entries (id, transaction_id, account_id, direction, amount_minor, currency)
-		VALUES ($1, $2, $3, $4, $5, $6)
-	`
-	for _, entry := range entries {
-		_, err := tx.Exec(ctx, query,
-			entry.ID, entry.TransactionID, entry.AccountID,
-			entry.Direction, entry.AmountMinor, entry.Currency,
-		)
-		if err != nil {
-			return fmt.Errorf("inserting ledger entry: %w", err)
-		}
-	}
-
-	if err := tx.Commit(ctx); err != nil {
-		return fmt.Errorf("committing transaction: %w", err)
-	}
-
-	return nil
-}
-
-// GetBalance computes the current balance for an account by summing all its ledger entries.
-func (r *ledgerRepository) GetBalance(ctx context.Context, accountID uuid.UUID) (int64, error) {
-	query := `
-		SELECT COALESCE(
-			SUM(CASE
-				WHEN direction = 'credit' THEN amount_minor
-				WHEN direction = 'debit'  THEN -amount_minor
-				ELSE 0
-			END),
-			0
-		) AS balance
-		FROM ledger_entries
-		WHERE account_id = $1
-	`
 	var balance int64
-	err := r.pool.QueryRow(ctx, query, accountID).Scan(&balance)
-	if err != nil {
-		return 0, fmt.Errorf("querying balance for account %s: %w", accountID, err)
+	if err := tx.QueryRow(ctx, balanceSQL, debit.AccountID).Scan(&balance); err != nil {
+		return err
 	}
-
-	return balance, nil
+	if balance < debit.AmountMinor {
+		return domain.ErrInsufficientFunds
+	}
+	for _, e := range entries {
+		if _, err := tx.Exec(ctx, `INSERT INTO ledger_entries(id,transaction_id,account_id,direction,amount_minor,currency) VALUES($1,$2,$3,$4,$5,$6)`, e.ID, txID, e.AccountID, e.Direction, e.AmountMinor, e.Currency); err != nil {
+			return err
+		}
+	}
+	event := ledgerPostedEvent{txID.String(), debit.AccountID.String(), credit.AccountID.String(), debit.AmountMinor, debit.Currency}
+	if err := eventbus.InsertOutbox(ctx, tx, "ledger.posted", txID.String(), event); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
 }
 
-// Deposit inserts a single credit ledger entry.
-func (r *ledgerRepository) Deposit(ctx context.Context, accountID uuid.UUID, amount int64, currency string) error {
-	query := `
-		INSERT INTO ledger_entries (id, transaction_id, account_id, direction, amount_minor, currency)
-		VALUES ($1, $2, $3, 'credit', $4, $5)
-	`
-	_, err := r.pool.Exec(ctx, query, uuid.New(), uuid.New(), accountID, amount, currency)
+func (r *ledgerRepository) GetBalance(ctx context.Context, id uuid.UUID) (int64, error) {
+	var balance int64
+	err := r.pool.QueryRow(ctx, balanceSQL, id).Scan(&balance)
+	return balance, err
+}
+
+func (r *ledgerRepository) Deposit(ctx context.Context, id uuid.UUID, amount int64, currency string) error {
+	if id == uuid.Nil || amount <= 0 || len(currency) != 3 {
+		return domain.ErrDoubleEntryViolation
+	}
+	tx, err := r.pool.Begin(ctx)
 	if err != nil {
-		return fmt.Errorf("inserting deposit entry: %w", err)
+		return err
+	}
+	defer tx.Rollback(context.Background())
+	if err := lock(ctx, tx, "ledger:account:"+id.String()); err != nil {
+		return err
+	}
+	if err := checkCurrency(ctx, tx, id, currency); err != nil {
+		return err
+	}
+	txID := uuid.New()
+	if _, err := tx.Exec(ctx, `INSERT INTO ledger_entries(id,transaction_id,account_id,direction,amount_minor,currency) VALUES($1,$2,$3,'credit',$4,$5)`, uuid.New(), txID, id, amount, currency); err != nil {
+		return err
+	}
+	event := ledgerPostedEvent{TransactionID: txID.String(), DestinationAccountID: id.String(), AmountMinor: amount, Currency: currency}
+	if err := eventbus.InsertOutbox(ctx, tx, "ledger.posted", txID.String(), event); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+func lock(ctx context.Context, tx pgx.Tx, key string) error {
+	_, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock(hashtextextended($1,0))", key)
+	return err
+}
+func checkCurrency(ctx context.Context, tx pgx.Tx, id uuid.UUID, currency string) error {
+	var mismatch bool
+	err := tx.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM ledger_entries WHERE account_id=$1 AND currency<>$2)", id, currency).Scan(&mismatch)
+	if err != nil {
+		return err
+	}
+	if mismatch {
+		return domain.ErrCurrencyMismatch
 	}
 	return nil
 }
-
-// collectAccountIDs extracts unique account IDs from a set of entries.
 func collectAccountIDs(entries []domain.LedgerEntry) []uuid.UUID {
-	seen := make(map[uuid.UUID]struct{})
+	seen := make(map[uuid.UUID]bool)
 	var ids []uuid.UUID
 	for _, e := range entries {
-		if _, ok := seen[e.AccountID]; !ok {
-			seen[e.AccountID] = struct{}{}
+		if !seen[e.AccountID] {
+			seen[e.AccountID] = true
 			ids = append(ids, e.AccountID)
 		}
 	}

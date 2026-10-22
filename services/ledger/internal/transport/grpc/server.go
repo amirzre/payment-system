@@ -26,7 +26,7 @@ func NewLedgerServer(service app.LedgerService) *LedgerServer {
 // PostEntries handles the PostEntries gRPC request.
 func (s *LedgerServer) PostEntries(ctx context.Context, req *ledgerv1.PostEntriesRequest) (*ledgerv1.PostEntriesResponse, error) {
 	txID, err := uuid.Parse(req.GetTransactionId())
-	if err != nil {
+	if err != nil || txID == uuid.Nil {
 		return nil, sharederrors.ToGRPCStatus(
 			sharederrors.New(sharederrors.KindInvalidArgument, "invalid transaction_id"),
 		)
@@ -39,28 +39,24 @@ func (s *LedgerServer) PostEntries(ctx context.Context, req *ledgerv1.PostEntrie
 		)
 	}
 
-	var sourceID, destID uuid.UUID
-	var amountMinor int64
-	var currency string
+	var debit, credit *ledgerv1.LedgerEntry
 
 	for _, e := range entries {
 		switch e.GetDirection() {
 		case ledgerv1.LedgerDirection_LEDGER_DIRECTION_DEBIT:
-			sourceID, err = uuid.Parse(e.GetAccountId())
-			if err != nil {
+			if debit != nil {
 				return nil, sharederrors.ToGRPCStatus(
-					sharederrors.New(sharederrors.KindInvalidArgument, "invalid source account_id"),
+					sharederrors.New(sharederrors.KindInvalidArgument, "exactly one debit entry required"),
 				)
 			}
-			amountMinor = e.GetAmountMinor()
-			currency = e.GetCurrency()
+			debit = e
 		case ledgerv1.LedgerDirection_LEDGER_DIRECTION_CREDIT:
-			destID, err = uuid.Parse(e.GetAccountId())
-			if err != nil {
+			if credit != nil {
 				return nil, sharederrors.ToGRPCStatus(
-					sharederrors.New(sharederrors.KindInvalidArgument, "invalid destination account_id"),
+					sharederrors.New(sharederrors.KindInvalidArgument, "exactly one credit entry required"),
 				)
 			}
+			credit = e
 		default:
 			return nil, sharederrors.ToGRPCStatus(
 				sharederrors.New(sharederrors.KindInvalidArgument, "direction must be 'debit' or 'credit'"),
@@ -68,15 +64,32 @@ func (s *LedgerServer) PostEntries(ctx context.Context, req *ledgerv1.PostEntrie
 		}
 	}
 
-	if sourceID == uuid.Nil || destID == uuid.Nil {
+	if debit == nil || credit == nil {
 		return nil, sharederrors.ToGRPCStatus(
 			sharederrors.New(sharederrors.KindInvalidArgument, "both debit and credit entries are required"),
 		)
 	}
 
-	if sourceID == uuid.Nil || destID == uuid.Nil {
+	sourceID, err := uuid.Parse(debit.GetAccountId())
+	if err != nil || sourceID == uuid.Nil {
 		return nil, sharederrors.ToGRPCStatus(
-			sharederrors.New(sharederrors.KindInvalidArgument, "both debit and credit entries are required"),
+			sharederrors.New(sharederrors.KindInvalidArgument, "invalid source account_id"),
+		)
+	}
+	destID, err := uuid.Parse(credit.GetAccountId())
+	if err != nil || destID == uuid.Nil {
+		return nil, sharederrors.ToGRPCStatus(
+			sharederrors.New(sharederrors.KindInvalidArgument, "invalid destination account_id"),
+		)
+	}
+	if debit.GetAmountMinor() <= 0 || debit.GetAmountMinor() != credit.GetAmountMinor() {
+		return nil, sharederrors.ToGRPCStatus(
+			sharederrors.New(sharederrors.KindInvalidArgument, "debit and credit amounts must be positive and equal"),
+		)
+	}
+	if len(debit.GetCurrency()) != 3 || debit.GetCurrency() != credit.GetCurrency() {
+		return nil, sharederrors.ToGRPCStatus(
+			sharederrors.New(sharederrors.KindInvalidArgument, "debit and credit currencies must be matching 3-letter codes"),
 		)
 	}
 
@@ -84,8 +97,8 @@ func (s *LedgerServer) PostEntries(ctx context.Context, req *ledgerv1.PostEntrie
 		TransactionID:   txID,
 		SourceAccountID: sourceID,
 		DestAccountID:   destID,
-		AmountMinor:     amountMinor,
-		Currency:        currency,
+		AmountMinor:     debit.GetAmountMinor(),
+		Currency:        debit.GetCurrency(),
 	})
 	if err != nil {
 		return nil, sharederrors.ToGRPCStatus(err)

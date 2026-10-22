@@ -1,0 +1,151 @@
+logging {
+	level  = "warn"
+	format = "json"
+}
+
+discovery.kubernetes "apps" {
+	role = "pod"
+
+	namespaces {
+		names = ["payment-system"]
+	}
+
+	selectors {
+		role  = "pod"
+		label = "observability.payment-system/enabled=true"
+	}
+}
+
+discovery.relabel "logs" {
+	targets = discovery.kubernetes.apps.targets
+
+	rule {
+		source_labels = ["__meta_kubernetes_pod_label_observability_payment_system_service"]
+		regex         = "(api-gateway|account-service|auth-service|ledger-service|payment-service)"
+		action        = "keep"
+	}
+
+	rule {
+		source_labels = ["__meta_kubernetes_pod_label_observability_payment_system_service"]
+		target_label  = "service"
+	}
+
+	rule {
+		source_labels = ["__meta_kubernetes_namespace"]
+		target_label  = "namespace"
+	}
+
+	rule {
+		source_labels = ["__meta_kubernetes_pod_container_name"]
+		target_label  = "container"
+	}
+
+	rule {
+		source_labels = ["__meta_kubernetes_pod_name"]
+		target_label  = "pod"
+	}
+}
+
+loki.source.kubernetes "apps" {
+	targets    = discovery.relabel.logs.output
+	forward_to = [loki.process.apps.receiver]
+}
+
+loki.process "apps" {
+	stage.json {
+		expressions = {level = "level"}
+	}
+
+	stage.labels {
+		values = {level = ""}
+	}
+	// Request/trace IDs stay in the JSON line, never in index labels.
+	forward_to = [loki.write.local.receiver]
+}
+
+loki.write "local" {
+	max_streams = 1000
+
+	endpoint {
+		url                 = "https://loki.observability.svc.cluster.local:3100/loki/api/v1/push"
+		batch_size          = "256KiB"
+		batch_wait          = "1s"
+		remote_timeout      = "5s"
+		min_backoff_period  = "500ms"
+		max_backoff_period  = "5s"
+		max_backoff_retries = 5
+
+		tls_config {
+			ca_file     = "/etc/observability/tls/backend-ca.crt"
+			cert_file   = "/etc/observability/tls/client.crt"
+			key_file    = "/etc/observability/tls/client.key"
+			min_version = "TLS12"
+		}
+	}
+}
+
+otelcol.receiver.otlp "apps" {
+	grpc {
+		endpoint          = "0.0.0.0:4317"
+		max_recv_msg_size = "4MiB"
+
+		tls {
+			cert_file      = "/etc/observability/tls/ingest-server.crt"
+			key_file       = "/etc/observability/tls/ingest-server.key"
+			client_ca_file = "/etc/observability/tls/app-ca.crt"
+			min_version    = "1.2"
+		}
+	}
+
+	output {
+		traces = [otelcol.processor.memory_limiter.bounded.input]
+	}
+}
+
+otelcol.processor.memory_limiter "bounded" {
+	check_interval = "1s"
+	limit          = "192MiB"
+	spike_limit    = "32MiB"
+
+	output {
+		traces = [otelcol.processor.batch.traces.input]
+	}
+}
+
+otelcol.processor.batch "traces" {
+	timeout             = "1s"
+	send_batch_size     = 256
+	send_batch_max_size = 512
+
+	output {
+		traces = [otelcol.exporter.otlp.tempo.input]
+	}
+}
+
+otelcol.exporter.otlp "tempo" {
+	timeout = "5s"
+
+	client {
+		endpoint = "tempo.observability.svc.cluster.local:4317"
+
+		tls {
+			ca_file     = "/etc/observability/tls/backend-ca.crt"
+			cert_file   = "/etc/observability/tls/client.crt"
+			key_file    = "/etc/observability/tls/client.key"
+			min_version = "1.2"
+		}
+	}
+
+	sending_queue {
+		enabled       = true
+		num_consumers = 2
+		queue_size    = 128
+	}
+
+	retry_on_failure {
+		enabled          = true
+		initial_interval = "1s"
+		max_interval     = "5s"
+		max_elapsed_time = "30s"
+	}
+}

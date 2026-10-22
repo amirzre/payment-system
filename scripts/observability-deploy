@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+cd "$(dirname "$0")/.."
+export KUBE_CONTEXT=${KUBE_CONTEXT:-kind-payment-system}
+
+kube() {
+  kubectl --context "$KUBE_CONTEXT" "$@"
+}
+
+# Discovery policies cover both the Service IP and the post-DNAT API endpoint.
+service_ip=$(kube -n default get svc kubernetes -o jsonpath='{.spec.clusterIP}')
+endpoint_ip=$(kube -n default get endpoints kubernetes -o jsonpath='{.subsets[0].addresses[0].ip}')
+export OBSERVABILITY_API_SERVICE_CIDR="${OBSERVABILITY_API_SERVICE_CIDR:-$service_ip/32}"
+export OBSERVABILITY_API_ENDPOINT_CIDR="${OBSERVABILITY_API_ENDPOINT_CIDR:-$endpoint_ip/32}"
+
+kube apply -f deploy/k8s/observability/namespace.yaml
+scripts/observability-bootstrap \
+  --state-dir "${OBSERVABILITY_STATE_DIR:-$HOME/.local/state/payment-system-observability}" \
+  --apply
+
+scripts/observability-render | kube apply -f -
+
+for component in prometheus loki tempo alloy grafana; do
+  kube -n observability rollout status "deployment/$component" --timeout=180s
+done
+
+scripts/observability-access --init-viewer

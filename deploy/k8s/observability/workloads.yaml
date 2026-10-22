@@ -1,0 +1,649 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: prometheus
+  namespace: observability
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: prometheus
+    app.kubernetes.io/part-of: payment-system-observability
+  ports:
+  - name: https
+    port: 9090
+    targetPort: https
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: prometheus
+  namespace: observability
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels: &prometheus_labels
+      app.kubernetes.io/name: prometheus
+      app.kubernetes.io/part-of: payment-system-observability
+  template:
+    metadata:
+      labels: *prometheus_labels
+      annotations:
+        checksum/observability-config: "@CONFIG_HASH_PROMETHEUS@"
+    spec:
+      serviceAccountName: prometheus
+      automountServiceAccountToken: true
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+        runAsGroup: 65534
+        fsGroup: 65534
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+      - name: prometheus
+        image: payment-system-observability-prometheus:@IMAGE_TAG@
+        imagePullPolicy: Never
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
+        ports:
+        - name: https
+          containerPort: 9090
+        volumeMounts:
+        - name: tls
+          mountPath: /etc/observability/tls
+          readOnly: true
+        - name: config
+          mountPath: /etc/observability/config
+          readOnly: true
+        - name: data
+          mountPath: /prometheus
+        - name: tmp
+          mountPath: /tmp
+        resources:
+          requests:
+            cpu: 200m
+            memory: 384Mi
+          limits:
+            cpu: '1'
+            memory: 1Gi
+        readinessProbe:
+          exec:
+            command: &prometheus_health_probe
+            - /usr/local/bin/observability-probe
+            - --url
+            - https://127.0.0.1:9090/-/ready
+            - --ca
+            - /etc/observability/tls/backend-ca.crt
+            - --cert
+            - /etc/observability/tls/client.crt
+            - --key
+            - /etc/observability/tls/client.key
+            - --server-name
+            - prometheus.observability.svc.cluster.local
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 6
+        startupProbe:
+          exec:
+            command: *prometheus_health_probe
+          periodSeconds: 5
+          timeoutSeconds: 5
+          failureThreshold: 60
+        args:
+        - --config.file=/etc/observability/config/prometheus.yml
+        - --web.config.file=/etc/observability/config/prometheus-web.yml
+        - --storage.tsdb.path=/prometheus
+        - --storage.tsdb.retention.time=7d
+        - --storage.tsdb.retention.size=4GB
+        - --query.max-concurrency=4
+        - --query.timeout=30s
+        - --query.max-samples=5000000
+        - --web.max-connections=128
+      volumes:
+      - name: tls
+        secret:
+          secretName: prometheus-tls
+          defaultMode: 288
+      - name: config
+        configMap:
+          name: observability-config
+      - name: tmp
+        emptyDir:
+          sizeLimit: 64Mi
+      - name: data
+        persistentVolumeClaim:
+          claimName: prometheus
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: loki
+  namespace: observability
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: loki
+    app.kubernetes.io/part-of: payment-system-observability
+  ports:
+  - name: https
+    port: 3100
+    targetPort: https
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: loki
+  namespace: observability
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels: &loki_labels
+      app.kubernetes.io/name: loki
+      app.kubernetes.io/part-of: payment-system-observability
+  template:
+    metadata:
+      labels: *loki_labels
+      annotations:
+        checksum/observability-config: "@CONFIG_HASH_LOKI@"
+    spec:
+      serviceAccountName: loki
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+      - name: loki
+        image: payment-system-observability-loki:@IMAGE_TAG@
+        imagePullPolicy: Never
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
+        ports:
+        - name: https
+          containerPort: 3100
+        volumeMounts:
+        - name: tls
+          mountPath: /etc/observability/tls
+          readOnly: true
+        - name: config
+          mountPath: /etc/observability/config
+          readOnly: true
+        - name: data
+          mountPath: /data
+        - name: tmp
+          mountPath: /tmp
+        resources:
+          requests:
+            cpu: 150m
+            memory: 384Mi
+          limits:
+            cpu: 750m
+            memory: 1Gi
+        readinessProbe:
+          exec:
+            command: &loki_health_probe
+            - /usr/local/bin/observability-probe
+            - --url
+            - https://127.0.0.1:3100/ready
+            - --ca
+            - /etc/observability/tls/backend-ca.crt
+            - --cert
+            - /etc/observability/tls/client.crt
+            - --key
+            - /etc/observability/tls/client.key
+            - --server-name
+            - loki.observability.svc.cluster.local
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 6
+        startupProbe:
+          exec:
+            command: *loki_health_probe
+          periodSeconds: 5
+          timeoutSeconds: 5
+          failureThreshold: 60
+        args:
+        - --supervise
+        - /usr/bin/loki
+        - --data-dir
+        - /data
+        - --max-data-bytes
+        - '4294967296'
+        - --
+        - -config.file=/etc/observability/config/loki.yml
+        command:
+        - /usr/local/bin/observability-probe
+      volumes:
+      - name: tls
+        secret:
+          secretName: loki-tls
+          defaultMode: 288
+      - name: config
+        configMap:
+          name: observability-config
+      - name: tmp
+        emptyDir:
+          sizeLimit: 64Mi
+      - name: data
+        persistentVolumeClaim:
+          claimName: loki
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: tempo
+  namespace: observability
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: tempo
+    app.kubernetes.io/part-of: payment-system-observability
+  ports:
+  - name: https
+    port: 3200
+    targetPort: https
+  - name: otlp
+    port: 4317
+    targetPort: otlp
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tempo
+  namespace: observability
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels: &tempo_labels
+      app.kubernetes.io/name: tempo
+      app.kubernetes.io/part-of: payment-system-observability
+  template:
+    metadata:
+      labels: *tempo_labels
+      annotations:
+        checksum/observability-config: "@CONFIG_HASH_TEMPO@"
+    spec:
+      serviceAccountName: tempo
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+      - name: tempo
+        image: payment-system-observability-tempo:@IMAGE_TAG@
+        imagePullPolicy: Never
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
+        ports:
+        - name: https
+          containerPort: 3200
+        - name: otlp
+          containerPort: 4317
+        volumeMounts:
+        - name: tls
+          mountPath: /etc/observability/tls
+          readOnly: true
+        - name: config
+          mountPath: /etc/observability/config
+          readOnly: true
+        - name: data
+          mountPath: /data
+        - name: tmp
+          mountPath: /tmp
+        resources:
+          requests:
+            cpu: 150m
+            memory: 384Mi
+          limits:
+            cpu: 750m
+            memory: 1Gi
+        readinessProbe:
+          exec:
+            command: &tempo_health_probe
+            - /usr/local/bin/observability-probe
+            - --url
+            - https://127.0.0.1:3200/ready
+            - --ca
+            - /etc/observability/tls/backend-ca.crt
+            - --cert
+            - /etc/observability/tls/client.crt
+            - --key
+            - /etc/observability/tls/client.key
+            - --server-name
+            - tempo.observability.svc.cluster.local
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 6
+        startupProbe:
+          exec:
+            command: *tempo_health_probe
+          periodSeconds: 5
+          timeoutSeconds: 5
+          failureThreshold: 60
+        args:
+        - --supervise
+        - /tempo
+        - --data-dir
+        - /data
+        - --max-data-bytes
+        - '4294967296'
+        - --
+        - -config.file=/etc/observability/config/tempo.yml
+        command:
+        - /usr/local/bin/observability-probe
+      volumes:
+      - name: tls
+        secret:
+          secretName: tempo-tls
+          defaultMode: 288
+      - name: config
+        configMap:
+          name: observability-config
+      - name: tmp
+        emptyDir:
+          sizeLimit: 64Mi
+      - name: data
+        persistentVolumeClaim:
+          claimName: tempo
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: alloy
+  namespace: observability
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: alloy
+    app.kubernetes.io/part-of: payment-system-observability
+  ports:
+  - name: otlp
+    port: 4317
+    targetPort: otlp
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: alloy
+  namespace: observability
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels: &alloy_labels
+      app.kubernetes.io/name: alloy
+      app.kubernetes.io/part-of: payment-system-observability
+  template:
+    metadata:
+      labels: *alloy_labels
+      annotations:
+        checksum/observability-config: "@CONFIG_HASH_ALLOY@"
+    spec:
+      serviceAccountName: alloy
+      automountServiceAccountToken: true
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 473
+        runAsGroup: 473
+        fsGroup: 473
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+      - name: alloy
+        image: payment-system-observability-alloy:@IMAGE_TAG@
+        imagePullPolicy: Never
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
+        ports:
+        - name: otlp
+          containerPort: 4317
+        volumeMounts:
+        - name: tls
+          mountPath: /etc/observability/tls
+          readOnly: true
+        - name: config
+          mountPath: /etc/observability/config
+          readOnly: true
+        - name: data
+          mountPath: /data
+        - name: tmp
+          mountPath: /tmp
+        resources:
+          requests:
+            cpu: 150m
+            memory: 256Mi
+          limits:
+            cpu: 750m
+            memory: 512Mi
+        readinessProbe:
+          exec:
+            command: &alloy_health_probe
+            - /usr/local/bin/observability-probe
+            - --url
+            - http://127.0.0.1:12345/-/healthy
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 6
+        startupProbe:
+          exec:
+            command: *alloy_health_probe
+          periodSeconds: 5
+          timeoutSeconds: 5
+          failureThreshold: 60
+        args:
+        - run
+        - --server.http.listen-addr=127.0.0.1:12345
+        - --storage.path=/data
+        - --disable-reporting
+        - /etc/observability/config/config.alloy
+      volumes:
+      - name: tls
+        secret:
+          secretName: alloy-tls
+          defaultMode: 288
+      - name: config
+        configMap:
+          name: observability-config
+      - name: tmp
+        emptyDir:
+          sizeLimit: 64Mi
+      - name: data
+        emptyDir:
+          sizeLimit: 256Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: grafana
+  namespace: observability
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: grafana
+    app.kubernetes.io/part-of: payment-system-observability
+  ports:
+  - name: https
+    port: 3000
+    targetPort: https
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: grafana
+  namespace: observability
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels: &grafana_labels
+      app.kubernetes.io/name: grafana
+      app.kubernetes.io/part-of: payment-system-observability
+  template:
+    metadata:
+      labels: *grafana_labels
+      annotations:
+        checksum/observability-config: "@CONFIG_HASH_GRAFANA@"
+    spec:
+      serviceAccountName: grafana
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 472
+        runAsGroup: 472
+        fsGroup: 472
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+      - name: grafana
+        image: payment-system-observability-grafana:@IMAGE_TAG@
+        imagePullPolicy: Never
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop:
+            - ALL
+        ports:
+        - name: https
+          containerPort: 3000
+        volumeMounts:
+        - name: tls
+          mountPath: /etc/observability/tls
+          readOnly: true
+        - name: config
+          mountPath: /etc/observability/config
+          readOnly: true
+        - name: data
+          mountPath: /var/lib/grafana
+        - name: tmp
+          mountPath: /tmp
+        - name: credentials
+          mountPath: /etc/observability/credentials
+          readOnly: true
+        - name: datasources
+          mountPath: /etc/grafana/provisioning/datasources
+          readOnly: true
+        - name: dashboard-provider
+          mountPath: /etc/grafana/provisioning/dashboards
+          readOnly: true
+        - name: dashboard
+          mountPath: /etc/grafana/dashboards
+          readOnly: true
+        resources:
+          requests:
+            cpu: 150m
+            memory: 256Mi
+          limits:
+            cpu: 750m
+            memory: 768Mi
+        readinessProbe:
+          exec:
+            command: &grafana_health_probe
+            - /usr/local/bin/observability-probe
+            - --url
+            - https://127.0.0.1:3000/api/health
+            - --ca
+            - /etc/observability/tls/backend-ca.crt
+            - --cert
+            - /etc/observability/tls/client.crt
+            - --key
+            - /etc/observability/tls/client.key
+            - --server-name
+            - grafana.observability.svc.cluster.local
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 6
+        startupProbe:
+          exec:
+            command: *grafana_health_probe
+          periodSeconds: 5
+          timeoutSeconds: 5
+          failureThreshold: 60
+        env:
+        - name: GF_PATHS_CONFIG
+          value: /etc/observability/config/grafana.ini
+        - name: GF_INSTALL_PLUGINS
+          value: ''
+        - name: BACKEND_CA
+          valueFrom:
+            secretKeyRef:
+              name: grafana-tls
+              key: backend-ca.crt
+        - name: BACKEND_CLIENT_CERT
+          valueFrom:
+            secretKeyRef:
+              name: grafana-tls
+              key: client.crt
+        - name: BACKEND_CLIENT_KEY
+          valueFrom:
+            secretKeyRef:
+              name: grafana-tls
+              key: client.key
+      volumes:
+      - name: tls
+        secret:
+          secretName: grafana-tls
+          defaultMode: 288
+      - name: config
+        configMap:
+          name: observability-config
+      - name: tmp
+        emptyDir:
+          sizeLimit: 64Mi
+      - name: data
+        persistentVolumeClaim:
+          claimName: grafana
+      - name: credentials
+        secret:
+          secretName: grafana-credentials
+          defaultMode: 288
+      - name: datasources
+        configMap:
+          name: grafana-datasources
+      - name: dashboard-provider
+        configMap:
+          name: grafana-dashboard-provider
+      - name: dashboard
+        configMap:
+          name: grafana-dashboard

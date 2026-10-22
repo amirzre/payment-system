@@ -11,6 +11,7 @@ import (
 // Payment status constants — the state machine.
 const (
 	StatusCreated       = "created"
+	StatusPosting       = "posting"
 	StatusFundsReserved = "funds_reserved"
 	StatusLedgerPosted  = "ledger_posted"
 	StatusCompleted     = "completed"
@@ -90,7 +91,8 @@ func (p *PaymentIntent) Transition(target string) error {
 
 // transitionTable defines all legal transitions.
 var transitionTable = map[string][]string{
-	StatusCreated:       {StatusFundsReserved, StatusFailed},
+	StatusCreated:       {StatusPosting, StatusFundsReserved, StatusFailed},
+	StatusPosting:       {StatusCompleted, StatusFailed},
 	StatusFundsReserved: {StatusLedgerPosted, StatusPaymentFailed},
 	StatusLedgerPosted:  {StatusCompleted, StatusCompensated},
 }
@@ -114,7 +116,7 @@ func (p *PaymentIntent) IsTerminal() bool {
 	return terminalStatuses[p.Status]
 }
 
-// SetTransactionID records the ledger transaction ID after posting.
+// SetTransactionID records the stable ledger transaction ID before posting.
 func (p *PaymentIntent) SetTransactionID(txID uuid.UUID) {
 	p.TransactionID = &txID
 }

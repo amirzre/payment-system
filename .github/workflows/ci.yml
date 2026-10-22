@@ -1,0 +1,218 @@
+name: CI Workflow
+
+on:
+  push:
+    branches:
+      - development
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GO_VERSION: "1.26"
+  GOTOOLCHAIN: local
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+      
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: |
+            go.work.sum
+            shared/go.sum
+            gen/go/go.sum
+            services/*/go.sum
+      
+      - name: Instal golangci-lint
+        env:
+          GOBIN: ${{ runner.temp }}/bin
+        run: |
+          set -euo pipefail
+          go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.13.0
+          echo "$GOBIN" >> "$GITHUB_PATH"
+      
+      - name: Lint all Go modules
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          modules=(
+            shared
+            gen/go
+            services/account
+            services/api-gateway
+            services/auth
+            services/ledger
+            services/payment
+          )
+
+          for module in "${modules[@]}"; do
+            echo "::group::Linting ${module}"
+            (
+              cd "$module"
+              golangci-lint run --timeout=5m ./...
+            )
+            echo "::endgroup::"
+          done
+  
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    needs: lint
+    timeout-minutes: 30
+
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: ci
+          POSTGRES_PASSWORD: ci-only-password
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ci -d postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      
+      redis:
+        image: redis:8-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+
+      nats:
+        image: nats:2-alpine
+        ports:
+          - 4222:4222
+
+    env:
+      PGHOST: localhost
+      PGPORT: "5432"
+      PGUSER: ci
+      PGPASSWORD: ci-only-password
+      REDIS_URL: redis://localhost:6379/0
+      NATS_URL: nats://localhost:4222
+      NATS_ADDR: nats://localhost:4222
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: |
+            go.work.sum
+            shared/go.sum
+            gen/go/go.sum
+            services/*/go.sum
+      
+      - name: Install PostgreSQL client
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes postgresql-client
+
+      - name: Wait for NATS
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          for attempt in $(seq 1 30); do
+            if (echo > /dev/tcp/127.0.0.1/4222) >/dev/null 2>&1; then
+              echo "NATS is accepting connections."
+              exit 0
+            fi
+            sleep 2
+          done
+
+          echo "NATS did not become ready in time." >&2
+          exit 1
+
+      - name: Create test databases
+        run: |
+          set -euo pipefail
+
+          for database in account auth ledger payment; do
+            psql -d postgres \
+              -v ON_ERROR_STOP=1 \
+              -c "CREATE DATABASE ${database};"
+          done
+      
+      - name: Apply database migrations
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          for service in account auth ledger payment; do
+            database_url="postgres://ci:ci-only-password@localhost:5432/${service}?sslmode=disable"
+
+            for migration in "services/${service}/migrations/"*.up.sql; do
+              if [[ ! -f "$migration" ]]; then
+                echo "No migration files found for ${service}." >&2
+                exit 1
+              fi
+
+              echo "Applying ${migration}"
+              psql "$database_url" \
+                -v ON_ERROR_STOP=1 \
+                -f "$migration"
+            done
+          done
+      
+      - name: Test shared module
+        working-directory: shared
+        run: go test -race ./...
+
+      - name: Test generated protobuf module
+        working-directory: gen/go
+        run: go test -race ./...
+
+      - name: Test account service
+        working-directory: services/account
+        env:
+          DATABASE_URL: postgres://ci:ci-only-password@localhost:5432/account?sslmode=disable
+        run: go test -race ./...
+
+      - name: Test auth service
+        working-directory: services/auth
+        env:
+          DATABASE_URL: postgres://ci:ci-only-password@localhost:5432/auth?sslmode=disable
+        run: go test -race ./...
+
+      - name: Test ledger service
+        working-directory: services/ledger
+        env:
+          DATABASE_URL: postgres://ci:ci-only-password@localhost:5432/ledger?sslmode=disable
+        run: go test -race ./...
+
+      - name: Test payment service
+        working-directory: services/payment
+        env:
+          DATABASE_URL: postgres://ci:ci-only-password@localhost:5432/payment?sslmode=disable
+        run: go test -race ./...
+
+      - name: Test API gateway
+        working-directory: services/api-gateway
+        run: go test -race ./...

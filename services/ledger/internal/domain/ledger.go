@@ -25,6 +25,9 @@ type LedgerEntry struct {
 }
 
 var ErrDoubleEntryViolation = errors.New("debit and credit amounts do not match")
+var ErrInsufficientFunds = errors.New("insufficient funds")
+var ErrTransactionConflict = errors.New("transaction ID already used with different entries")
+var ErrCurrencyMismatch = errors.New("account ledger currency mismatch")
 
 // NewLedgerEntryPair returns exactly one debit and one credit entry that sum to zero.
 func NewLedgerEntryPair(txID, sourceAccountID, destAccountID uuid.UUID, amountMinor int64, currency string) (debit, credit LedgerEntry, err error) {

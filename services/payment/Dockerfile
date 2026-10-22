@@ -33,6 +33,6 @@ COPY --from=builder /out/payment-service /app/payment-service
 
 EXPOSE 50053
 
-USER appuser:appuser
+USER 1000:1000
 
 ENTRYPOINT ["/app/payment-service"]

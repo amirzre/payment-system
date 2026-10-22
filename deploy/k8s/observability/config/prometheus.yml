@@ -1,0 +1,42 @@
+global:
+  scrape_interval: 15s
+  scrape_timeout: 5s
+  external_labels:
+    environment: kind
+scrape_configs:
+  - job_name: payment-services
+    scheme: https
+    metrics_path: /metrics
+    sample_limit: 10000
+    label_limit: 20
+    label_name_length_limit: 100
+    label_value_length_limit: 200
+    tls_config:
+      ca_file: /etc/observability/tls/metrics-ca.crt
+      cert_file: /etc/observability/tls/metrics-client.crt
+      key_file: /etc/observability/tls/metrics-client.key
+      server_name: metrics.payment-system.svc.cluster.local
+      min_version: TLS12
+    kubernetes_sd_configs:
+      - role: pod
+        namespaces:
+          names: [payment-system]
+    relabel_configs:
+      - source_labels: [__meta_kubernetes_pod_label_observability_payment_system_enabled]
+        regex: 'true'
+        action: keep
+      - source_labels: [__meta_kubernetes_pod_phase]
+        regex: Running
+        action: keep
+      - source_labels: [__meta_kubernetes_pod_container_port_name]
+        regex: metrics
+        action: keep
+      - source_labels: [__meta_kubernetes_pod_label_observability_payment_system_service]
+        regex: (api-gateway|account-service|auth-service|ledger-service|payment-service)
+        action: keep
+      - source_labels: [__meta_kubernetes_pod_label_observability_payment_system_service]
+        target_label: service
+      - source_labels: [__meta_kubernetes_namespace]
+        target_label: namespace
+      - source_labels: [__meta_kubernetes_pod_name]
+        target_label: pod

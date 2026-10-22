@@ -1,0 +1,129 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: nats
+  namespace: payment-system
+  labels:
+    app.kubernetes.io/name: nats
+    app.kubernetes.io/component: messaging
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: nats
+  ports:
+    - name: client
+      port: 4222
+      targetPort: client
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nats-config
+  namespace: payment-system
+  labels:
+    app.kubernetes.io/name: nats
+    app.kubernetes.io/component: messaging
+data:
+  nats.conf: |
+    server_name: payment-system-nats
+    port: 4222
+    authorization {
+      users = [
+        {
+          user: $NATS_USER
+          password: $NATS_PASSWORD
+        }
+      ]
+    }
+    jetstream {
+      store_dir: /data/jetstream
+    }
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: nats
+  namespace: payment-system
+  labels:
+    app.kubernetes.io/name: nats
+    app.kubernetes.io/component: messaging
+spec:
+  serviceName: nats
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: nats
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: nats
+        app.kubernetes.io/component: messaging
+    spec:
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: nats
+          image: nats:2.15-alpine
+          imagePullPolicy: IfNotPresent
+          command:
+            - nats-server
+          args:
+            - -c
+            - /etc/nats/nats.conf
+          env:
+            - name: NATS_USER
+              valueFrom:
+                secretKeyRef:
+                  name: nats-credentials
+                  key: NATS_USER
+            - name: NATS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: nats-credentials
+                  key: NATS_PASSWORD
+          ports:
+            - name: client
+              containerPort: 4222
+          readinessProbe:
+            tcpSocket:
+              port: client
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 6
+          livenessProbe:
+            tcpSocket:
+              port: client
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 6
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: nats-config
+              mountPath: /etc/nats
+            - name: nats-data
+              mountPath: /data
+      volumes:
+        - name: nats-config
+          configMap:
+            name: nats-config
+  volumeClaimTemplates:
+    - metadata:
+        name: nats-data
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        resources:
+          requests:
+            storage: 2Gi

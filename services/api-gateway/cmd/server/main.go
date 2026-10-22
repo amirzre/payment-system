@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	accountv1 "github.com/amirzre/payment-system/gen/go/account/v1"
 	authv1 "github.com/amirzre/payment-system/gen/go/auth/v1"
@@ -16,6 +17,7 @@ import (
 	gatewayhttp "github.com/amirzre/payment-system/services/api-gateway/internal/transport/http"
 	"github.com/amirzre/payment-system/shared/logger"
 	"github.com/amirzre/payment-system/shared/middleware"
+	"github.com/amirzre/payment-system/shared/observability"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 )
@@ -28,34 +30,52 @@ func main() {
 	log := logger.New(cfg.Server.Environment, "api-gateway")
 	log.Info("starting api-gateway", slog.Int("port", cfg.Server.HTTPPort))
 
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	telemetry, err := observability.Init(ctx, "api-gateway")
+	if err != nil {
+		log.Error("invalid observability configuration", slog.Any("error", err))
+		os.Exit(1)
+	}
+	defer func() {
+		flushCtx, stop := context.WithTimeout(context.Background(), 5*time.Second)
+		defer stop()
+		if err := telemetry.Shutdown(flushCtx); err != nil {
+			log.Error("telemetry shutdown failed", slog.Any("error", err))
+		}
+	}()
+
 	// gRPC connections
-	accountConn, _ := grpc.NewClient(cfg.Service.AccountGRPCAddr,
+	accountConn, _ := grpc.NewClient(cfg.Service.AccountGRPCAddr, append([]grpc.DialOption{
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithDefaultCallOptions(grpc.WaitForReady(true)),
 		grpc.WithChainUnaryInterceptor(
 			middleware.UnaryClientCircuitBreaker(middleware.DefaultCircuitBreakerConfig()),
 			middleware.UnaryClientRetry(middleware.DefaultRetryConfig()),
 		),
-	)
+	}, observability.GRPCClientOptions()...)...)
 	defer accountConn.Close()
 	accountClient := accountv1.NewAccountServiceClient(accountConn)
 
-	paymentConn, _ := grpc.NewClient(cfg.Service.PaymentGRPCAddr,
+	paymentConn, _ := grpc.NewClient(cfg.Service.PaymentGRPCAddr, append([]grpc.DialOption{
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithDefaultCallOptions(grpc.WaitForReady(true)),
 		grpc.WithChainUnaryInterceptor(
 			middleware.UnaryClientCircuitBreaker(middleware.DefaultCircuitBreakerConfig()),
 			middleware.UnaryClientRetry(middleware.DefaultRetryConfig()),
 		),
-	)
+	}, observability.GRPCClientOptions()...)...)
 	defer paymentConn.Close()
 	paymentClient := paymentv1.NewPaymentServiceClient(paymentConn)
 
-	authConn, _ := grpc.NewClient(cfg.Service.AuthGRPCAddr,
+	authConn, _ := grpc.NewClient(cfg.Service.AuthGRPCAddr, append([]grpc.DialOption{
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithDefaultCallOptions(grpc.WaitForReady(true)),
 		grpc.WithChainUnaryInterceptor(
 			middleware.UnaryClientCircuitBreaker(middleware.DefaultCircuitBreakerConfig()),
 			middleware.UnaryClientRetry(middleware.DefaultRetryConfig()),
 		),
-	)
+	}, observability.GRPCClientOptions()...)...)
 	defer authConn.Close()
 	authClient := authv1.NewAuthServiceClient(authConn)
 
@@ -95,14 +115,26 @@ func main() {
 	mux.Handle("/v1/payments", protectedHandler)
 	mux.Handle("/v1/payments/", protectedHandler)
 
-	server := &http.Server{Addr: fmt.Sprintf(":%d", cfg.Server.HTTPPort), Handler: mux}
+	server := &http.Server{
+		Addr:              fmt.Sprintf(":%d", cfg.Server.HTTPPort),
+		Handler:           observability.HTTPHandler(log, mux),
+		ReadHeaderTimeout: 5 * time.Second,
+		IdleTimeout:       60 * time.Second,
+	}
 
+	shutdownDone := make(chan struct{})
 	go func() {
+		defer close(shutdownDone)
 		sigCh := make(chan os.Signal, 1)
 		signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 		<-sigCh
 		log.Info("shutting down")
-		server.Shutdown(context.Background())
+		cancel()
+		drainCtx, stop := context.WithTimeout(context.Background(), 20*time.Second)
+		defer stop()
+		if err := server.Shutdown(drainCtx); err != nil {
+			server.Close()
+		}
 	}()
 
 	log.Info("HTTP server listening", slog.Int("port", cfg.Server.HTTPPort))
@@ -110,5 +142,5 @@ func main() {
 		log.Error("HTTP server failed", slog.Any("error", err))
 		os.Exit(1)
 	}
-
+	<-shutdownDone
 }

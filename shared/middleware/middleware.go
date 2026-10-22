@@ -3,9 +3,10 @@ package middleware
 import (
 	"context"
 	"log/slog"
-	"runtime/debug"
+	"strings"
 	"time"
 
+	"github.com/amirzre/payment-system/shared/metrics"
 	"github.com/google/uuid"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -27,10 +28,8 @@ func RecoveryInterceptor(logger *slog.Logger) grpc.UnaryServerInterceptor {
 	return func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (resp any, err error) {
 		defer func() {
 			if r := recover(); r != nil {
-				logger.Error("panic recovered in gRPC handler",
-					slog.String("method", info.FullMethod),
-					slog.Any("panic", r),
-					slog.String("stack", string(debug.Stack())),
+				logger.ErrorContext(ctx, "panic recovered in gRPC handler",
+					slog.String("method", metrics.Method(info.FullMethod)),
 				)
 				err = status.Error(codes.Internal, "internal server error")
 			}
@@ -52,7 +51,7 @@ func RequestIDInterceptor() grpc.UnaryServerInterceptor {
 		if vals := md.Get(MetadataKeyRequestID); len(vals) > 0 {
 			requestID = vals[0]
 		}
-		if requestID == "" {
+		if !validRequestID(requestID) {
 			requestID = uuid.NewString()
 			md.Set(MetadataKeyRequestID, requestID)
 			ctx = metadata.NewIncomingContext(ctx, md)
@@ -67,6 +66,9 @@ func RequestIDInterceptor() grpc.UnaryServerInterceptor {
 // LoggingInterceptor logs every gRPC request with method, duration, and status.
 func LoggingInterceptor(logger *slog.Logger) grpc.UnaryServerInterceptor {
 	return func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
+		if excludedMethod(info.FullMethod) {
+			return handler(ctx, req)
+		}
 		start := time.Now()
 		resp, err := handler(ctx, req)
 		duration := time.Since(start)
@@ -93,9 +95,9 @@ func LoggingInterceptor(logger *slog.Logger) grpc.UnaryServerInterceptor {
 		}
 
 		logger.Log(ctx, level, "gRPC request",
-			slog.String("method", info.FullMethod),
+			slog.String("method", metrics.Method(info.FullMethod)),
 			slog.String("code", code.String()),
-			slog.Duration("duration", duration),
+			slog.Float64("duration_seconds", duration.Seconds()),
 			slog.String("request_id", requestID),
 		)
 
@@ -111,4 +113,20 @@ func UnaryServerChain(logger *slog.Logger) grpc.ServerOption {
 		RequestIDInterceptor(),
 		LoggingInterceptor(logger),
 	)
+}
+
+func validRequestID(v string) bool {
+	if len(v) == 0 || len(v) > 64 {
+		return false
+	}
+	for _, r := range v {
+		if !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '-' || r == '_') {
+			return false
+		}
+	}
+	return true
+}
+
+func excludedMethod(v string) bool {
+	return strings.HasPrefix(v, "/grpc.health.v1.Health/") || strings.HasPrefix(v, "/grpc.reflection.")
 }

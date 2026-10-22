@@ -33,6 +33,6 @@ COPY --from=builder /out/ledger-service /app/ledger-service
 
 EXPOSE 50052
 
-USER appuser:appuser
+USER 1000:1000
 
 ENTRYPOINT ["/app/ledger-service"]
