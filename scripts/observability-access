@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+KUBE_CONTEXT=${KUBE_CONTEXT:-kind-payment-system}
+
+if [[ ${1:-} == --init-viewer ]]; then
+  kubectl --context "$KUBE_CONTEXT" -n observability exec deploy/grafana -- \
+    /usr/local/bin/observability-probe \
+    --init-viewer \
+    --url https://127.0.0.1:3000 \
+    --ca /etc/observability/tls/backend-ca.crt \
+    --server-name grafana.observability.svc.cluster.local
+
+  printf 'Routine Viewer initialized; credentials remain in the local PKI state and Kubernetes Secret.\n'
+  exit
+fi
+
+printf 'Grafana: https://localhost:3000 (trust backend-ca.crt first). Login: viewer.\n'
+printf 'Passwords are in %s; use admin only for administration.\n' \
+  "${OBSERVABILITY_STATE_DIR:-$HOME/.local/state/payment-system-observability}"
+
+exec kubectl --context "$KUBE_CONTEXT" -n observability port-forward \
+  --address 127.0.0.1 svc/grafana 3000:3000

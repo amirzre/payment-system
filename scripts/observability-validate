@@ -1,0 +1,51 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+cd "$(dirname "$0")/.."
+source deploy/k8s/observability/images.lock
+
+fingerprint=$(
+  cat deploy/k8s/observability/images.lock \
+    deploy/k8s/observability/images/Dockerfile \
+    scripts/observability-probe.go |
+    sha256sum | cut -c1-16
+)
+
+# Derived images preserve the pinned upstream binaries and may be cached locally.
+component_image() {
+  local component="$1"
+  local image_variable="${component^^}_IMAGE"
+  local derived="payment-system-observability-${component}:${fingerprint}"
+
+  if docker image inspect "$derived" >/dev/null 2>&1; then
+    printf '%s' "$derived"
+  else
+    printf '%s' "${!image_variable}"
+  fi
+}
+
+PROMETHEUS_IMAGE=$(component_image prometheus)
+LOKI_IMAGE=$(component_image loki)
+TEMPO_IMAGE=$(component_image tempo)
+ALLOY_IMAGE=$(component_image alloy)
+config="$PWD/deploy/k8s/observability/config"
+
+# Check actual component parsers without giving validation containers a network.
+docker run --rm --network none -v "$config:/config:ro,Z" \
+  --entrypoint /bin/promtool "$PROMETHEUS_IMAGE" \
+  check config --syntax-only /config/prometheus.yml
+
+docker run --rm --network none -v "$config:/config:ro,Z" \
+  "$LOKI_IMAGE" -config.file=/config/loki.yml -verify-config=true
+
+docker run --rm --network none -v "$config:/config:ro,Z" \
+  "$ALLOY_IMAGE" validate /config/config.alloy
+
+docker run --rm --network none -v "$config:/config:ro,Z" \
+  "$TEMPO_IMAGE" -config.file=/config/tempo.yml -config.verify=true
+
+scripts/observability-render |
+  kubectl --context "${KUBE_CONTEXT:-kind-payment-system}" create \
+    --dry-run=client --validate=true -f - -o name >/dev/null
+
+printf 'Component configurations and Kubernetes resources validated.\n'
