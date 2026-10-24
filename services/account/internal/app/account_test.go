@@ -115,7 +115,7 @@ func TestGetBalanceCachesResolvedCurrencyForPristineAndFundedAccounts(t *testing
 		t.Fatal(err)
 	}
 	client := redis.NewClient(options)
-	t.Cleanup(func() { client.Close() })
+	t.Cleanup(func() { _ = client.Close() })
 	if err := client.Ping(context.Background()).Err(); err != nil {
 		t.Fatal(err)
 	}
@@ -162,7 +162,7 @@ func TestGetBalanceReadsCachedValueAndRejectsMalformedCache(t *testing.T) {
 		t.Fatal(err)
 	}
 	client := redis.NewClient(options)
-	t.Cleanup(func() { client.Close() })
+	t.Cleanup(func() { _ = client.Close() })
 	if err := client.Ping(context.Background()).Err(); err != nil {
 		t.Fatal(err)
 	}
@@ -174,7 +174,7 @@ func TestGetBalanceReadsCachedValueAndRejectsMalformedCache(t *testing.T) {
 	}
 	original := os.Stdin
 	os.Stdin = stdin
-	t.Cleanup(func() { os.Stdin = original; stdin.Close() })
+	t.Cleanup(func() { os.Stdin = original; _ = stdin.Close() })
 	for _, tc := range []struct {
 		name, value string
 		amount      int64

@@ -18,7 +18,7 @@ func TestPaymentOperationSpanDoesNotContainPaymentData(t *testing.T) {
 	provider := sdktrace.NewTracerProvider(sdktrace.WithSyncer(exporter))
 	previous := otel.GetTracerProvider()
 	otel.SetTracerProvider(provider)
-	t.Cleanup(func() { otel.SetTracerProvider(previous); provider.Shutdown(context.Background()) })
+	t.Cleanup(func() { otel.SetTracerProvider(previous); _ = provider.Shutdown(context.Background()) })
 	service := NewPaymentService(
 		repository.NewPaymentRepository(pool),
 		accountClientFixture{},
@@ -36,7 +36,7 @@ func TestPaymentOperationSpanDoesNotContainPaymentData(t *testing.T) {
 			found = true
 		}
 		for _, attribute := range span.Attributes {
-			value := attribute.Value.Emit()
+			value := attribute.Value.String()
 			if strings.Contains(value, secret) || strings.Contains(value, input.SourceAccountID.String()) || strings.Contains(value, input.DestinationAccountID.String()) {
 				t.Fatalf("payment data exposed in span attribute %s", attribute.Key)
 			}

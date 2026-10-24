@@ -67,7 +67,7 @@ func TestRetryDefaultCodes(t *testing.T) {
 	} {
 		t.Run(tc.code.String(), func(t *testing.T) {
 			attempts := 0
-			UnaryClientRetry(fastRetryConfig())(context.Background(), "/account.v1.AccountService/GetBalance", nil, nil, nil,
+			_ = UnaryClientRetry(fastRetryConfig())(context.Background(), "/account.v1.AccountService/GetBalance", nil, nil, nil,
 				func(context.Context, string, any, any, *grpc.ClientConn, ...grpc.CallOption) error {
 					attempts++
 					return status.Error(tc.code, "failure")
@@ -84,7 +84,7 @@ func TestRetryZeroAndNegativeRetriesDisable(t *testing.T) {
 		cfg := fastRetryConfig()
 		cfg.MaxRetries = retries
 		attempts := 0
-		UnaryClientRetry(cfg)(context.Background(), "/account.v1.AccountService/GetBalance", nil, nil, nil,
+		_ = UnaryClientRetry(cfg)(context.Background(), "/account.v1.AccountService/GetBalance", nil, nil, nil,
 			func(context.Context, string, any, any, *grpc.ClientConn, ...grpc.CallOption) error {
 				attempts++
 				return status.Error(codes.Unavailable, "failure")
@@ -150,7 +150,7 @@ func TestRetryExplicitMethodPolicy(t *testing.T) {
 		cfg := fastRetryConfig()
 		cfg.RetryableMethods = tc.methods
 		attempts := 0
-		UnaryClientRetry(cfg)(context.Background(), tc.method, nil, nil, nil,
+		_ = UnaryClientRetry(cfg)(context.Background(), tc.method, nil, nil, nil,
 			func(context.Context, string, any, any, *grpc.ClientConn, ...grpc.CallOption) error {
 				attempts++
 				return status.Error(codes.Unavailable, "failure")

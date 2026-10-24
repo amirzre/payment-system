@@ -45,7 +45,9 @@ func paymentAppDB(t *testing.T) *pgxpool.Pool {
 	}
 	t.Cleanup(func() {
 		pool.Close()
-		admin.Exec(context.Background(), "DROP SCHEMA "+schema+" CASCADE")
+		if _, err := admin.Exec(context.Background(), "DROP SCHEMA "+schema+" CASCADE"); err != nil {
+			t.Error(err)
+		}
 		admin.Close()
 	})
 	files, _ := filepath.Glob("../../migrations/*.up.sql")

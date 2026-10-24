@@ -80,10 +80,10 @@ func main() {
 		rdb = redis.NewClient(redisOptions)
 		if err := rdb.Ping(ctx).Err(); err != nil {
 			log.Warn("Redis unavailable, cache disabled", slog.Any("error", err))
-			rdb.Close()
+			_ = rdb.Close()
 			rdb = nil
 		} else {
-			defer rdb.Close()
+			defer func() { _ = rdb.Close() }()
 			log.Info("connected to Redis")
 		}
 	}
@@ -110,7 +110,7 @@ func main() {
 			middleware.UnaryClientRetry(middleware.DefaultRetryConfig()),
 		),
 	}, observability.GRPCClientOptions()...)...)
-	defer ledgerConn.Close()
+	defer func() { _ = ledgerConn.Close() }()
 	ledgerClient := ledgerv1.NewLedgerServiceClient(ledgerConn)
 
 	// Construct dependency graph

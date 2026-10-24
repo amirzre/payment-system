@@ -107,7 +107,7 @@ func TestMetricsMTLSRejectsMissingAndWrongIdentity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer runtime.Shutdown(context.Background())
+	defer func() { _ = runtime.Shutdown(context.Background()) }()
 	roots := x509.NewCertPool()
 	roots.AppendCertsFromPEM(serverCA.pem)
 	for _, tc := range []struct {
@@ -131,7 +131,7 @@ func TestMetricsMTLSRejectsMissingAndWrongIdentity(t *testing.T) {
 			res, err := client.Get("https://" + runtime.listener.Addr().String() + "/metrics")
 			if !tc.ok {
 				if err == nil {
-					res.Body.Close()
+					_ = res.Body.Close()
 					t.Fatal("unauthorized certificate accepted")
 				}
 				return
@@ -139,7 +139,7 @@ func TestMetricsMTLSRejectsMissingAndWrongIdentity(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			defer res.Body.Close()
+			defer func() { _ = res.Body.Close() }()
 			body, err := io.ReadAll(res.Body)
 			if err != nil || !strings.Contains(string(body), "go_goroutines") {
 				t.Fatalf("metrics missing runtime: %v", err)
@@ -216,7 +216,7 @@ func TestAuthenticatedOTLPExportSanitizesAutomaticAndCustomAttributes(t *testing
 	defer server.Stop()
 	recorder := &traceRecorder{requests: make(chan *tracepb.ExportTraceServiceRequest, 4)}
 	tracepb.RegisterTraceServiceServer(server, recorder)
-	go server.Serve(listener)
+	go func() { _ = server.Serve(listener) }()
 	cert, key := leaf(t, appCA, "payment-service", x509.ExtKeyUsageClientAuth)
 	t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "https://"+listener.Addr().String())
 	t.Setenv("OTEL_EXPORTER_OTLP_CERTIFICATE", writeCert(t, "ca.pem", serverCA.pem))

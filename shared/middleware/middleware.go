@@ -120,11 +120,18 @@ func validRequestID(v string) bool {
 		return false
 	}
 	for _, r := range v {
-		if !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '-' || r == '_') {
+		if !isRequestIDChar(r) {
 			return false
 		}
 	}
 	return true
+}
+
+func isRequestIDChar(r rune) bool {
+	return r >= 'a' && r <= 'z' ||
+		r >= 'A' && r <= 'Z' ||
+		r >= '0' && r <= '9' ||
+		r == '-' || r == '_'
 }
 
 func excludedMethod(v string) bool {

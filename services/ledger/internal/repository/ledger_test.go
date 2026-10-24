@@ -39,7 +39,9 @@ func ledgerTestDB(t *testing.T) (*pgxpool.Pool, LedgerRepository) {
 	}
 	t.Cleanup(func() {
 		pool.Close()
-		admin.Exec(context.Background(), "DROP SCHEMA "+schema+" CASCADE")
+		if _, err := admin.Exec(context.Background(), "DROP SCHEMA "+schema+" CASCADE"); err != nil {
+			t.Error(err)
+		}
 		admin.Close()
 	})
 	files, err := filepath.Glob("../../migrations/*.up.sql")

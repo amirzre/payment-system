@@ -44,7 +44,7 @@ func withIdempotency(db *pgxpool.Pool, consumerName string, h func(context.Conte
 		if err != nil {
 			return fmt.Errorf("beginning idempotency tx: %w", err)
 		}
-		defer tx.Rollback(context.Background())
+		defer func() { _ = tx.Rollback(context.Background()) }()
 
 		// Record the event as being processed
 		result, err := tx.Exec(ctx, `

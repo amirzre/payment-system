@@ -53,7 +53,7 @@ func TestInsertOutboxSharesBusinessTransaction(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer tx.Rollback(ctx)
+	defer func() { _ = tx.Rollback(ctx) }()
 	if _, err = tx.Exec(ctx, `INSERT INTO effects(event_key,value) VALUES('atomic-event',1)`); err != nil {
 		t.Fatal(err)
 	}
