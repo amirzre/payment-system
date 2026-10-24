@@ -16,7 +16,7 @@ func TestGRPCHealthProtocol(t *testing.T) {
 	listener := bufconn.Listen(1024 * 1024)
 	server := grpc.NewServer()
 	health := RegisterGRPC(server)
-	go server.Serve(listener)
+	go func() { _ = server.Serve(listener) }()
 	t.Cleanup(server.Stop)
 	conn, err := grpc.NewClient("passthrough:///health",
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
@@ -26,7 +26,7 @@ func TestGRPCHealthProtocol(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { conn.Close() })
+	t.Cleanup(func() { _ = conn.Close() })
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	client := healthpb.NewHealthClient(conn)

@@ -63,12 +63,12 @@ func TestCacheInvalidationFailureRollsBackMarkerAndRecoveryRetries(t *testing.T)
 		t.Fatal(err)
 	}
 	client := redis.NewClient(options)
-	t.Cleanup(func() { client.Close() })
+	t.Cleanup(func() { _ = client.Close() })
 	if err := client.Ping(ctx).Err(); err != nil {
 		t.Fatal(err)
 	}
 	closed := redis.NewClient(options)
-	closed.Close()
+	_ = closed.Close()
 	for _, tc := range []struct {
 		name        string
 		unavailable *redis.Client
@@ -140,7 +140,7 @@ func TestCacheInvalidationRejectsMalformedSuppliedTransactionIdentifiers(t *test
 		t.Fatal(err)
 	}
 	client := redis.NewClient(options)
-	t.Cleanup(func() { client.Close() })
+	t.Cleanup(func() { _ = client.Close() })
 	if err := client.Ping(context.Background()).Err(); err != nil {
 		t.Fatal(err)
 	}
@@ -171,7 +171,7 @@ func TestCacheInvalidationRejectsMalformedSuppliedTransactionIdentifiers(t *test
 func TestCacheInvalidationReturnsErrorWhenRedisUnavailable(t *testing.T) {
 	tx, source, destination := uuid.NewString(), uuid.NewString(), uuid.NewString()
 	closed := redis.NewClient(&redis.Options{Addr: "127.0.0.1:1"})
-	closed.Close()
+	_ = closed.Close()
 	for _, tc := range []struct {
 		name   string
 		client *redis.Client
@@ -194,7 +194,7 @@ func TestCacheInvalidationDeletesAffectedAccountsAndRejectsMalformedEvents(t *te
 		t.Fatal(err)
 	}
 	client := redis.NewClient(options)
-	t.Cleanup(func() { client.Close() })
+	t.Cleanup(func() { _ = client.Close() })
 	if err := client.Ping(context.Background()).Err(); err != nil {
 		t.Fatal(err)
 	}

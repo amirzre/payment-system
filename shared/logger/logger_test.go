@@ -9,9 +9,12 @@ import (
 )
 
 func TestNew_Production(t *testing.T) {
-	var buf bytes.Buffer
 	logger := New("production", "test-service")
+	if logger == nil {
+		t.Fatal("expected non-nil logger")
+	}
 
+	var buf bytes.Buffer
 	handler := slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelInfo})
 	logger = slog.New(handler).With(slog.String("service", "test-service"))
 

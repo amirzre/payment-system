@@ -26,7 +26,7 @@ import (
 func TestGRPCPropagationPrivacyAndHealthExclusion(t *testing.T) {
 	exp := tracetest.NewInMemoryExporter()
 	tp := sdktrace.NewTracerProvider(sdktrace.WithSyncer(safeExporter{exp}))
-	defer tp.Shutdown(context.Background())
+	defer func() { _ = tp.Shutdown(context.Background()) }()
 	old := otel.GetTracerProvider()
 	otel.SetTracerProvider(tp)
 	defer otel.SetTracerProvider(old)
@@ -47,7 +47,7 @@ func TestGRPCPropagationPrivacyAndHealthExclusion(t *testing.T) {
 		return nil, status.Error(codes.Unavailable, "sentinel-password")
 	}}}}, struct{}{})
 	healthpb.RegisterHealthServer(server, health.NewServer())
-	go server.Serve(listener)
+	go func() { _ = server.Serve(listener) }()
 	opts := append(
 		GRPCClientOptions(),
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
@@ -57,7 +57,7 @@ func TestGRPCPropagationPrivacyAndHealthExclusion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 	ctx, parent := tp.Tracer("test").Start(ctx, "payment.create")

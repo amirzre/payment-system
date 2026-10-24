@@ -45,7 +45,7 @@ func assertBreakerClosed(t *testing.T, cb grpc.UnaryClientInterceptor) {
 func TestCircuitBreakerNonServerResponseResetsConsecutiveFailures(t *testing.T) {
 	cb := UnaryClientCircuitBreaker(CircuitBreakerConfig{FailureThreshold: 2, SuccessThreshold: 2, OpenTimeout: time.Hour})
 	for _, code := range []codes.Code{codes.Unavailable, codes.InvalidArgument, codes.Unavailable} {
-		breakerCall(cb, context.Background(), func() error { return status.Error(code, "failure") })
+		_ = breakerCall(cb, context.Background(), func() error { return status.Error(code, "failure") })
 	}
 	called := false
 	err := breakerCall(cb, context.Background(), func() error { called = true; return nil })
@@ -56,7 +56,7 @@ func TestCircuitBreakerNonServerResponseResetsConsecutiveFailures(t *testing.T) 
 
 func TestCircuitBreakerOnlyOneHalfOpenProbe(t *testing.T) {
 	cb, advance := deterministicBreaker(CircuitBreakerConfig{FailureThreshold: 1, SuccessThreshold: 2, OpenTimeout: time.Minute})
-	breakerCall(cb, context.Background(), func() error { return status.Error(codes.Unavailable, "outage") })
+	_ = breakerCall(cb, context.Background(), func() error { return status.Error(codes.Unavailable, "outage") })
 	advance(time.Minute)
 	for probe := 0; probe < 2; probe++ {
 		started, release, done := make(chan struct{}), make(chan struct{}), make(chan error, 1)
@@ -84,7 +84,7 @@ func TestCircuitBreakerIgnoresStaleSuccess(t *testing.T) {
 		done <- breakerCall(cb, context.Background(), func() error { close(started); <-release; return nil })
 	}()
 	<-started
-	breakerCall(cb, context.Background(), func() error { return status.Error(codes.Unavailable, "outage") })
+	_ = breakerCall(cb, context.Background(), func() error { return status.Error(codes.Unavailable, "outage") })
 	advance(time.Minute)
 	probeStarted, probeRelease, probeDone := make(chan struct{}), make(chan struct{}), make(chan error, 1)
 	go func() {
@@ -128,7 +128,7 @@ func TestCircuitBreakerIgnoresStaleFailureAfterRecovery(t *testing.T) {
 		done <- breakerCall(cb, context.Background(), func() error { close(started); <-release; return status.Error(codes.Unavailable, "late failure") })
 	}()
 	<-started
-	breakerCall(cb, context.Background(), func() error { return status.Error(codes.Unavailable, "outage") })
+	_ = breakerCall(cb, context.Background(), func() error { return status.Error(codes.Unavailable, "outage") })
 	advance(time.Minute)
 	for range 2 {
 		if err := breakerCall(cb, context.Background(), func() error { return nil }); err != nil {
@@ -174,12 +174,12 @@ func TestCircuitBreakerEndedContextDoesNotInvoke(t *testing.T) {
 func TestCircuitBreakerFailedRecoveryReopens(t *testing.T) {
 	cb, advance := deterministicBreaker(CircuitBreakerConfig{FailureThreshold: 1, SuccessThreshold: 2, OpenTimeout: time.Minute})
 	fail := func() error { return status.Error(codes.Unavailable, "outage") }
-	breakerCall(cb, context.Background(), fail)
+	_ = breakerCall(cb, context.Background(), fail)
 	advance(time.Minute)
 	if err := breakerCall(cb, context.Background(), func() error { return nil }); err != nil {
 		t.Fatal(err)
 	}
-	breakerCall(cb, context.Background(), fail)
+	_ = breakerCall(cb, context.Background(), fail)
 	called := false
 	err := breakerCall(cb, context.Background(), func() error { called = true; return nil })
 	if called || status.Code(err) != codes.Unavailable {
@@ -209,7 +209,7 @@ func TestCircuitBreakerFailedRecoveryReopens(t *testing.T) {
 
 func TestCircuitBreakerCancellationReleasesProbe(t *testing.T) {
 	cb, advance := deterministicBreaker(CircuitBreakerConfig{FailureThreshold: 1, SuccessThreshold: 2, OpenTimeout: time.Minute})
-	breakerCall(cb, context.Background(), func() error { return status.Error(codes.Unavailable, "outage") })
+	_ = breakerCall(cb, context.Background(), func() error { return status.Error(codes.Unavailable, "outage") })
 	advance(time.Minute)
 	ctx, cancel := context.WithCancel(context.Background())
 	err := breakerCall(cb, ctx, func() error { cancel(); return context.Canceled })

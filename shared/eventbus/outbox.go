@@ -52,7 +52,7 @@ func publishOutbox(ctx context.Context, db *pgxpool.Pool, pub Publisher, log *sl
 		log.ErrorContext(ctx, "beginning outbox tx")
 		return
 	}
-	defer tx.Rollback(context.Background())
+	defer func() { _ = tx.Rollback(context.Background()) }()
 	rows, err := tx.Query(ctx, `
 		SELECT id, subject, key, payload, trace_context
 		FROM outbox

@@ -65,7 +65,7 @@ func (r *ledgerRepository) PostEntries(ctx context.Context, txID uuid.UUID, entr
 	if err != nil {
 		return fmt.Errorf("beginning ledger transaction: %w", err)
 	}
-	defer tx.Rollback(context.Background())
+	defer func() { _ = tx.Rollback(context.Background()) }()
 	// Serialize a transaction ID before checking for a previous successful call.
 	if err := lock(ctx, tx, "ledger:tx:"+txID.String()); err != nil {
 		return err
@@ -147,7 +147,7 @@ func (r *ledgerRepository) Deposit(ctx context.Context, id uuid.UUID, amount int
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback(context.Background())
+	defer func() { _ = tx.Rollback(context.Background()) }()
 	if err := lock(ctx, tx, "ledger:account:"+id.String()); err != nil {
 		return err
 	}

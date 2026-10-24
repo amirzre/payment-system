@@ -61,7 +61,7 @@ func TestRejectInvalidEnabledConfig(t *testing.T) {
 			t.Setenv(tc.key, tc.value)
 			r, err := Init(context.Background(), "payment-service")
 			if r != nil {
-				r.Shutdown(context.Background())
+				_ = r.Shutdown(context.Background())
 			}
 			if err == nil {
 				t.Fatal("insecure config accepted")
@@ -76,7 +76,7 @@ func TestRejectInvalidEnabledConfig(t *testing.T) {
 func TestHTTPNestedRoutePropagationPrivacyAndPanic(t *testing.T) {
 	exp := tracetest.NewInMemoryExporter()
 	tp := sdktrace.NewTracerProvider(sdktrace.WithSyncer(safeExporter{exp}))
-	defer tp.Shutdown(context.Background())
+	defer func() { _ = tp.Shutdown(context.Background()) }()
 	old := otel.GetTracerProvider()
 	otel.SetTracerProvider(tp)
 	defer otel.SetTracerProvider(old)
@@ -144,7 +144,7 @@ func stringifyAttrs(a []attribute.KeyValue) string {
 	var b strings.Builder
 	for _, v := range a {
 		b.WriteString(string(v.Key))
-		b.WriteString(v.Value.Emit())
+		b.WriteString(v.Value.String())
 	}
 	return b.String()
 }
@@ -167,7 +167,7 @@ func TestInvalidSamplerAndInsecureOverrides(t *testing.T) {
 			t.Setenv(tc.key, tc.value)
 			r, err := Init(context.Background(), "payment-service")
 			if r != nil {
-				r.Shutdown(context.Background())
+				_ = r.Shutdown(context.Background())
 			}
 			if err == nil {
 				t.Fatalf("accepted invalid %s", tc.key)

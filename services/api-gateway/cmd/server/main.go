@@ -54,7 +54,7 @@ func main() {
 			middleware.UnaryClientRetry(middleware.DefaultRetryConfig()),
 		),
 	}, observability.GRPCClientOptions()...)...)
-	defer accountConn.Close()
+	defer func() { _ = accountConn.Close() }()
 	accountClient := accountv1.NewAccountServiceClient(accountConn)
 
 	paymentConn, _ := grpc.NewClient(cfg.Service.PaymentGRPCAddr, append([]grpc.DialOption{
@@ -65,7 +65,7 @@ func main() {
 			middleware.UnaryClientRetry(middleware.DefaultRetryConfig()),
 		),
 	}, observability.GRPCClientOptions()...)...)
-	defer paymentConn.Close()
+	defer func() { _ = paymentConn.Close() }()
 	paymentClient := paymentv1.NewPaymentServiceClient(paymentConn)
 
 	authConn, _ := grpc.NewClient(cfg.Service.AuthGRPCAddr, append([]grpc.DialOption{
@@ -76,7 +76,7 @@ func main() {
 			middleware.UnaryClientRetry(middleware.DefaultRetryConfig()),
 		),
 	}, observability.GRPCClientOptions()...)...)
-	defer authConn.Close()
+	defer func() { _ = authConn.Close() }()
 	authClient := authv1.NewAuthServiceClient(authConn)
 
 	// Handlers
@@ -91,7 +91,7 @@ func main() {
 	mux.HandleFunc("POST /v1/auth/login", authHandler.Login)
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("ok"))
+		_, _ = w.Write([]byte("ok"))
 	})
 
 	// Protected
@@ -108,7 +108,7 @@ func main() {
 	})
 	protected.HandleFunc("POST /v1/accounts/{id}/deposit", accountHandler.Deposit)
 
-	var protectedHandler http.Handler = gatewayhttp.AuthMiddleware(authClient)(protected)
+	protectedHandler := gatewayhttp.AuthMiddleware(authClient)(protected)
 
 	mux.Handle("/v1/accounts", protectedHandler)
 	mux.Handle("/v1/accounts/", protectedHandler)
@@ -133,7 +133,7 @@ func main() {
 		drainCtx, stop := context.WithTimeout(context.Background(), 20*time.Second)
 		defer stop()
 		if err := server.Shutdown(drainCtx); err != nil {
-			server.Close()
+			_ = server.Close()
 		}
 	}()
 

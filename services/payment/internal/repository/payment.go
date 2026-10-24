@@ -82,7 +82,7 @@ func (r *paymentRepository) Process(ctx context.Context, id uuid.UUID, h func(pg
 	if err != nil {
 		return nil, err
 	}
-	defer tx.Rollback(context.Background())
+	defer func() { _ = tx.Rollback(context.Background()) }()
 	p, err := scanPayment(tx.QueryRow(ctx, `SELECT `+paymentColumns+` FROM payment_intents WHERE id=$1 FOR UPDATE`, id))
 	if err != nil {
 		return nil, err

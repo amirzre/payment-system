@@ -21,7 +21,7 @@ func TestBalanceCacheRecordsHitAndMiss(t *testing.T) {
 		t.Fatal(err)
 	}
 	cache := redis.NewClient(options)
-	defer cache.Close()
+	defer func() { _ = cache.Close() }()
 	id := uuid.New()
 	key := "balance:" + id.String()
 	defer cache.Del(context.Background(), key)

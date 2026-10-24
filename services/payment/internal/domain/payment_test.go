@@ -68,8 +68,8 @@ func TestPaymentIntentStateMachine(t *testing.T) {
 			t.Fatalf("NewPaymentIntent: %v", err)
 		}
 
-		p.Transition(StatusFundsReserved)
-		p.Transition(StatusLedgerPosted)
+		_ = p.Transition(StatusFundsReserved)
+		_ = p.Transition(StatusLedgerPosted)
 		if err := p.Transition(StatusCompensated); err != nil {
 			t.Fatalf("transition to compensated: %v", err)
 		}
@@ -84,7 +84,7 @@ func TestPaymentIntentStateMachine(t *testing.T) {
 			t.Fatalf("NewPaymentIntent: %v", err)
 		}
 
-		p.Transition(StatusFundsReserved)
+		_ = p.Transition(StatusFundsReserved)
 		if err := p.Transition(StatusPaymentFailed); err != nil {
 			t.Fatalf("transition to payment_failed: %v", err)
 		}

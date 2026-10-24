@@ -80,12 +80,12 @@ func main() {
 		}
 		rdb := redis.NewClient(redisOptions)
 		if err := rdb.Ping(ctx).Err(); err == nil {
-			defer rdb.Close()
+			defer func() { _ = rdb.Close() }()
 			log.Info("connected to Redis")
 			redisIdempotency = middleware.NewRedisIdempotency(rdb, 24*time.Hour, "idempotency")
 		} else {
 			log.Warn("Redis unavailable, idempotency cache disabled", slog.Any("error", err))
-			rdb.Close()
+			_ = rdb.Close()
 		}
 	}
 
@@ -112,7 +112,7 @@ func main() {
 			middleware.UnaryClientRetry(middleware.DefaultRetryConfig()),
 		),
 	}, observability.GRPCClientOptions()...)...)
-	defer accountConn.Close()
+	defer func() { _ = accountConn.Close() }()
 	accountClient := accountv1.NewAccountServiceClient(accountConn)
 
 	ledgerConn, _ := grpc.NewClient(cfg.Service.LedgerGRPCAddr, append([]grpc.DialOption{
@@ -123,7 +123,7 @@ func main() {
 			middleware.UnaryClientRetry(middleware.DefaultRetryConfig()),
 		),
 	}, observability.GRPCClientOptions()...)...)
-	defer ledgerConn.Close()
+	defer func() { _ = ledgerConn.Close() }()
 	ledgerClient := ledgerv1.NewLedgerServiceClient(ledgerConn)
 
 	// Construct dependency graph

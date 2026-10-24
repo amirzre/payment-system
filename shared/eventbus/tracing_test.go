@@ -61,7 +61,7 @@ func TestInsertOutboxPersistsOnlyTraceContext(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer tx.Rollback(context.Background())
+	defer func() { _ = tx.Rollback(context.Background()) }()
 	if err = InsertOutbox(ctx, tx, "test.event", "key", json.RawMessage(`{"amount":9007199254740993}`)); err != nil {
 		t.Fatal(err)
 	}
@@ -90,7 +90,7 @@ func TestInsertOutboxWithoutValidSpanStoresEmptyContext(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer tx.Rollback(ctx)
+	defer func() { _ = tx.Rollback(ctx) }()
 	if err = InsertOutbox(ctx, tx, "test.event", "legacy", map[string]bool{"ok": true}); err != nil {
 		t.Fatal(err)
 	}

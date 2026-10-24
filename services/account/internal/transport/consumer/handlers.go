@@ -49,7 +49,7 @@ func CacheInvalidationHandler(redisClient *redis.Client, log *slog.Logger) event
 
 		if redisClient == nil {
 			metrics.RecordCache("invalidate", "error")
-			return fmt.Errorf("Redis unavailable for ledger.posted cache invalidation")
+			return fmt.Errorf("redis unavailable for ledger.posted cache invalidation")
 		}
 
 		if err := redisClient.Del(ctx, cacheKeys...).Err(); err != nil {
